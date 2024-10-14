@@ -1,0 +1,27 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Config rule that checks whether the AWS Lambda function policy 
+          attached to the Lambda resource prohibits public access. 
+          If the Lambda function policy allows public access it is noncompliant."
+Parameters:
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: None
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"  
+Resources:
+  rAWSConfigRule:
+    Type: 'AWS::Config::ConfigRule'
+    Properties:
+      Description: "A Config rule that checks whether the AWS Lambda function policy 
+          attached to the Lambda resource prohibits public access. 
+          If the Lambda function policy allows public access it is noncompliant."
+      Scope:
+        ComplianceResourceTypes:
+          - 'AWS::Lambda::Function'
+      Source:
+        Owner: AWS
+        SourceIdentifier: LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED

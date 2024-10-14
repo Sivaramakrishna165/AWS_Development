@@ -1,0 +1,166 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "CF Template to create AWS Config rule which checks (by default)
+  whether completed volumes have the following tags (with values)
+  in a customer account:
+    - Name
+    - Environment
+    - Owner
+    - Project
+    - Compliance
+  The VolumeRequiredTags parameter can accept other tags - if desired.
+  If additional debugging is required, there is a TracingFlag parameter
+  that can be set to enable AWS X-Ray tracing."
+Parameters:
+  TracingFlag:
+    Description: "Flag to enable AWS X-Ray tracing (set to Active)
+      for debugging. Default setting is PassThrough."
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/CloudWatch/TracingFlag"
+  pFeatureVersion:
+      Type: String
+      Default: 'None'
+      Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+ 
+  pDXCS3KeyPrefix:
+      Type: String
+      Default: 'None'
+      Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+    
+  VolumeRequiredTags:
+    Description: "Required tags on an EBS volume that should
+      be present for compliance"
+    Type: CommaDelimitedList
+    Default: "Name, Environment, Owner, Project, Compliance"
+  DXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/ConfigRuleEbsVolume/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+
+  pFtEbsVolVolumeIdListToSkip:
+    Type: String
+    Default: "Blank"
+    Description: "List of ebs_volumes to be skipped from config compliance check. For multiple volumes to be skipped evaluating against the config rule, use comma separated values."
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Location of DXC Managed Services Assets:"
+        Parameters:
+          - DXCS3BucketName
+    ParameterLabels:
+      DXCS3BucketName:
+        default: "S3 Bucket Name:"
+
+Resources:
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "LambdaExecution"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeSnapshots
+                Effect: Allow
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: "arn:aws:s3:::*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: "arn:aws:s3:::*/AWSLogs/*/Config/*"
+              - Effect: Allow
+                Action:
+                  - "config:Put*"
+                  - "config:Get*"
+                  - "config:List*"
+                  - "config:Describe*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: "*"
+  ConfigPermissionToCallLambda:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName:
+        Fn::GetAtt:
+          - VolumeTagsComplianceCheck
+          - Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "config.amazonaws.com"
+  VolumeTagsComplianceCheck:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: "Lambda function that evaluates if completed
+        volumes contain defined flags for compliance"
+      Code:
+        S3Bucket: !Ref DXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/config_rule_ebs_volume_tags.zip"
+      Handler: "index.lambda_handler"
+      Runtime: python3.11
+      Timeout: 300
+      MemorySize: 384
+      TracingConfig:
+        Mode: !Ref TracingFlag
+      Role:
+        Fn::GetAtt:
+          - LambdaExecutionRole
+          - Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "Custom Lambda for AWS Config Rule -
+            ebs-volumes-required-tags"
+        -
+          Key: "Owner"
+          Value: "DXC"
+  AWSConfigRule:
+    Type: "AWS::Config::ConfigRule"
+    Properties:
+      Description: Checks whether EBS volumes have required tags.
+      InputParameters:
+        volumeRequiredTags: !Ref VolumeRequiredTags
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::Volume
+      Source:
+        Owner: "CUSTOM_LAMBDA"
+        SourceDetails:
+          -
+            EventSource: "aws.config"
+            MessageType: "ConfigurationItemChangeNotification"
+        SourceIdentifier:
+          Fn::GetAtt:
+            - VolumeTagsComplianceCheck
+            - Arn
+    DependsOn: ConfigPermissionToCallLambda

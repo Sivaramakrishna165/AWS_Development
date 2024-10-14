@@ -1,0 +1,92 @@
+{
+    "AWSElasticDisasterRecoveryAgentRole": {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": "drs.amazonaws.com"
+                },
+                "Action": [
+                    "sts:AssumeRole",
+                    "sts:SetSourceIdentity"
+                ],
+                "Condition": {
+                    "StringLike": {
+                        "sts:SourceIdentity": "s-*",
+                        "aws:SourceAccount": ""
+                    }
+                }
+            }
+        ]
+    },
+    "AWSElasticDisasterRecoveryFailbackRole":{
+      "Version": "2012-10-17",
+      "Statement": [
+          {
+              "Effect": "Allow",
+              "Principal": {
+                  "Service": "drs.amazonaws.com"
+              },
+              "Action": [
+                  "sts:AssumeRole",
+                  "sts:SetSourceIdentity"
+              ],
+              "Condition": {
+                  "StringLike": {
+                      "aws:SourceAccount": "",
+                      "sts:SourceIdentity": "i-*"
+                  }
+              }
+          }
+      ]
+    },
+    "AWSElasticDisasterRecoveryConversionServerRole":{
+      "Version":  "2012-10-17",
+       "Statement": [
+          {
+               "Effect":  "Allow",
+               "Principal": {
+                   "Service":  "ec2.amazonaws.com"
+              },
+               "Action":  "sts:AssumeRole"
+          }
+      ]
+    },
+    "AWSElasticDisasterRecoveryRecoveryInstanceRole":{
+      "Version":  "2012-10-17",
+       "Statement": [
+          {
+               "Effect":  "Allow",
+               "Principal": {
+                   "Service":  "ec2.amazonaws.com"
+              },
+               "Action":  "sts:AssumeRole"
+          }
+      ]
+    },
+    "AWSElasticDisasterRecoveryReplicationServerRole":{
+      "Version":  "2012-10-17",
+       "Statement": [
+          {
+               "Effect":  "Allow",
+               "Principal": {
+                   "Service":  "ec2.amazonaws.com"
+              },
+               "Action":  "sts:AssumeRole"
+          }
+      ]
+    },
+    "AWSElasticDisasterRecoveryRecoveryInstanceWithLaunchActionsRole":{
+        "Version":  "2012-10-17",
+         "Statement": [
+            {
+                 "Effect":  "Allow",
+                 "Principal": {
+                     "Service":  "ec2.amazonaws.com"
+                },
+                 "Action":  "sts:AssumeRole"
+            }
+        ]
+      }    
+  }

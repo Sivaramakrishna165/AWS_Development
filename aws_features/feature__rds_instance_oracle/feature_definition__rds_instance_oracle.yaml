@@ -1,0 +1,382 @@
+Feature: RDSInstanceOracle
+Version: '13.0.0.4'
+StandardCreationBatch: 3
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creates RDS Instance Oracle
+RDSParameters:
+  DBInstanceIdentifier:
+    Description: '[Required] A name for the DB instance. (Please validate the name and change if necessary and should be in small letters)'
+    Type: String
+    Default: 'oracleinstance'
+  DBSnapshotIdentifier:
+    Description: 'Optional name or Amazon Resource Name (ARN) of the DB snapshot from which you want to restore (leave blank to create an empty database).'
+    Type: String
+    Default: ''
+  DBAllocatedStorage:
+    Description: 'The allocated storage size, specified in GB (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 16384
+  DBInstanceClass:
+    Description: 'Please provide the instance type of database server. For ex - db.m5.large or which is compatible as per engine version.'
+    Type: String
+    Default: ''
+  EngineEdition:
+    Description: 'Oracle engione edition standard edition 2(se2) or enterprise(ee)'
+    Type: String
+    Default: 'oracle-se2'
+    AllowedValues: ['oracle-ee','oracle-se2']
+  DBName:
+    Description: 'Name of the database (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: String
+    Default: ''
+  DBBackupRetentionPeriod:
+    Description: 'The number of days to keep snapshots of the database. Setting this parameter to 0 disables automated backups'
+    Type: Number
+    MinValue: 0
+    MaxValue: 35
+    Default: 30
+  DBMasterUsername:
+    Description: 'The master user name for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: String
+    Default: master
+  DBMasterUserPassword:
+    Description: 'The master password for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot. Also ignored when ParentSecretStack is used).'
+    Type: String
+    NoEcho: true
+    Default: 'temppassword'
+  DBMultiAZ:
+    Description: 'Specifies if the database instance is deployed to multiple Availability Zones for HA.'
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  DBOptionGroupName:
+    Description: 'Optional. Provide name of an existing DB option group. Leave blank for if not exists'
+    Type: String
+    Default: ''
+  DBLicenseModel:
+    Description: 'Optional. Provide name of an existing DB option group. Leave blank for if not exists'
+    Type: String
+    Default: 'license-included'
+    AllowedValues: ["license-included","bring-your-own-license"]
+  SubDomainNameWithDot:
+    Description: 'Name that is used to create the DNS entry with trailing dot, e.g. ?{SubDomainNameWithDot}?{HostedZoneName}. Leave blank for naked (or apex and bare) domain. Requires ParentZoneStack parameter!'
+    Type: String
+    Default: 'oracle.'
+  DBParameterGroupName:
+    Description: 'Optional. Provide the existing DB parameter group. Leave blank for if not exists'
+    Type: String
+    Default: ''
+  CloudwatchLogsExports:
+    Description: 'Comma-delimited list of log types that need to be enabled for exporting to CloudWatch Logs. Leave blank for disabling EnableCloudwatchLogsExports'
+    Type: String
+    Default: "audit,alert,listener,trace,oemagent"
+  PreferredBackupWindow:
+    Description: 'The daily time range in UTC during which you want to create automated backups.'
+    Type: String
+    Default: '09:54-10:24'
+  PreferredMaintenanceWindow:
+    Description: The weekly time range (in UTC) during which system maintenance can occur.
+    Type: String
+    Default: 'sat:07:00-sat:07:30'
+  EngineVersion:
+    Description: 'Please provide the Oracle engine version.'
+    Type: String
+    Default: ''
+  AllowMajorVersionUpgrade:
+    Description: 'Allow database major engine version upgrades. Use with caution, test first in dev'
+    Type: String
+    Default: False   
+  VpcName:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC Identifier, Provide any WorkLoad VPC V2 ID, default is WL VPC V2 ID.
+    Default: ""
+  SecurityGroup:
+    Type: String
+    Default: ''
+    Description: '[DO NOT Change] Default SG for the WL VPC will le loaded from SES.'
+  EnableIAMDatabaseAuthentication:
+    Description: 'Enable mapping of AWS Identity and Access Management (IAM) accounts to database accounts (https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/UsingWithRDS.IAMDBAuth.html).'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  PriorityIncidentTopic:
+    Description: 'SNS Priority Incident Topic for service now alerts'
+    Type: "String"
+    Default: "DXCMS-CW-Alarms-Create-Incidents"
+  StorageType:
+    Type: String
+    Default: 'gp3'
+    AllowedValues: ['standard','gp2','gp3']
+    Description: 'Specifies the storage type to be associated with the DB instance.(STANDARD storage type does not support multi-region disaster recovery functionality.)'
+  StorageEncrypted:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: 'Provide true if you want to encrypt your RDS DB Instance else keep that false'
+  RDSEncryptionOption:
+    Type: String
+    Default: Default KMS
+    Description: Select the encryption option to encrypt the RDS DB Instances.
+    AllowedValues:
+      - Default KMS
+      - Customer Managed KMS    
+  KmsKeyArn:
+    Type: String
+    Default: ''
+    Description: 'Provide the ARN of the AWS CMK KMS key that is used to encrypt the DB instance, otherwise it will use AWS Default Managed KMS'
+  pCommonServicenowTopic:
+    Type: String
+    Default: "/DXC/SES/Module/CommonServicenow/ComSnowStdInputArn"
+    Description: SSM parameter which stores Common ServiceNow Standard Input Topic ARN    
+ 
+Alarms:
+  DatabaseCPUUtilizationAlarm:
+    ApplyCPUUtilizationAlarm:
+      Description: 'Enable for creating CPU Utilisation Alarm. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities is deployed.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    CPUUtilizationPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 300
+    CPUUtilizationStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    CPUUtilizationThreshold:
+      Description: 'The value to compare with the specified statistic.'
+      Type: Number
+      Default: 80
+      MinValue: 1
+      MaxValue: 100
+    CPUUtilizationEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 2
+    CPUUtilizationComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'GreaterThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+    
+  DatabaseFreeableMemoryAlarm:
+    ApplyFreeableMemoryAlarm:
+      Description: 'Enable for creating Memory Utilization Alarm. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities is deployed.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    FreeableMemoryPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 300
+    FreeableMemoryStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    FreeableMemoryThreshold:
+      Description: 'Average database freeable memory over last 10 minutes too low, performance may suffer'
+      Type: Number
+      Default: 15     
+    FreeableMemoryEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 1
+    FreeableMemoryComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'LessThanOrEqualToThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  DatabaseFreeStorageSpaceAlarm:
+    ApplyFreeStorageSpaceAlarm:
+      Description: 'Enable for creating Disk Space Utilisation Alarm. '
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    FreeStorageSpacePeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 300
+    FreeStorageSpaceStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Minimum'
+    FreeStorageSpaceThreshold:
+      Description: 'Given % or less of storage space available on RDS Instance.'
+      Type: Number
+      Default: 15
+      MinValue: 0
+      MaxValue: 100
+    FreeStorageSpaceEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 1
+    FreeStorageSpaceComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'LessThanOrEqualToThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+  
+  DatabaseBurstBalanceAlarm:
+    ApplyBurstBalanceAlarm:
+      Description: 'Storage Burst Balance Credits Below 10% '
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    BurstBalancePeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 600
+    BurstBalanceStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    BurstBalanceThreshold:
+      Description: 'Threshold for the Burst Balance.'
+      Type: Number
+      Default: 15
+    BurstBalanceEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 1
+    BurstBalanceComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'LessThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  DatabaseDiskQueueDepthAlarm:
+    ApplyDiskQueueDepthAlarm:
+      Description: 'Enable for creating Disk Queue Depth Alarm.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    DiskQueueDepthPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 600
+    DiskQueueDepthStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    DiskQueueDepthThreshold:
+      Description: 'Threshold for the DiskQueueDepth'
+      Type: Number
+      Default: '64'
+    DiskQueueDepthEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 1
+    DiskQueueDepthComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'GreaterThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  DatabaseReadLatencyAlarm:
+    ApplyReadLatencyAlarm:
+      Description: 'Enable for creating Read Latency Alarm.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    ReadLatencyPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 600
+    ReadLatencyStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    ReadLatencyThreshold:
+      Description: 'Threshold for the ReadLatency'
+      Type: Number
+      Default: '0.05'
+    ReadLatencyEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 1
+    ReadLatencyComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'GreaterThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  DatabaseSwapUsageAlarm:
+    ApplySwapUsageAlarm:
+      Description: 'Enable for creating Swap Usage Alarm.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    SwapUsagePeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 600
+    SwapUsageStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    SwapUsageThreshold:
+      Description: 'Threshold for the SwapUsage. 256MB in bytes'
+      Type: Number
+      Default: '256000000'
+    SwapUsageEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 1
+    SwapUsageComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'GreaterThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  DatabaseWriteLatencyAlarm:
+    ApplyWriteLatencyAlarm:
+      Description: 'Enable for creating Write Latency Alarm.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    WriteLatencyPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 600
+    WriteLatencyStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    WriteLatencyThreshold:
+      Description: 'Threshold for the WriteLatency.'
+      Type: Number
+      Default: '0.05'
+    WriteLatencyEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 1
+    WriteLatencyComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'GreaterThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+AllowDisable: true
+ResourceDeployment:
+  - RDSInstanceOracle.yaml
+DependsOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities

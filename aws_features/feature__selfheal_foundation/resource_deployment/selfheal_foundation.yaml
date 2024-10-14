@@ -1,0 +1,1032 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'A regional template for the Self-Heal Foundation which will analyse the event and trigger the selfheal usecase.'
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/SelfhealFoundation/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pCloudOpsEmailID:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Notification/DXCNotifyEmail
+    Description: SSM Parameter contains the CloudOps Email_Ids
+  pCommonSNOWTopic:
+    Description: '[DO NOT CHANGE] ssm param of Common ServiceNow Topic for service now alerts'
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/SES/Module/CommonServicenow/ComSnowStdInputArn"  
+  pCloudOpsS3Bucket:
+    Type: String
+    Default: 'cloudops-self-heal-reports'
+    Description: 'Enter the Cloudops Bucket, example: cloudops-self-heal-reports'
+
+Resources:
+
+  rDxcmsSHCloudOpsS3BucketSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/SelfHeal/CloudOps_S3_Bucket'
+      Type: String
+      Value: !Ref pCloudOpsS3Bucket
+      Description: 'SSM Parameter contains the Cloudops S3 Bucket.'
+
+  rSelfHealLambdaRoleNameSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/SelfHeal/LambdaExecutionRoleName'
+      Type: String
+      Value: !Ref rDxcmsSHLambdaExecutionRole
+      Description: Lambda Execution Iam Role Name for Self-Heal.
+
+  rSelfHealSFNRoleNameSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/SelfHeal/StepFunctionExecutionRoleName'
+      Type: String
+      Value: !Ref rDxcmsSHStateMachineExecutionRole
+      Description: Step Execution Iam Role Name for Self-Heal.
+
+  rDxcmsSHSenderEmailIdSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/SelfHeal/SenderEmailId'
+      Type: String
+      Value: 'cloudops_user_support@dxc.com'
+      Description: Enter the sender email id.  
+
+  rDxcmsSHCloudopsTeamsChannelSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/SelfHeal/MsTeamsChannelEmailId'
+      Type: String
+      Value: 'abc@example.com'
+      Description: Enter the MS teams channel email id.  
+  
+  rDxcmsSHCloudopsNotifyEmailSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/SelfHeal/CloudOpsNotifyEmail'
+      Type: String
+      Value: 'cloudops_user_support@dxc.com'
+      Description: Enter the DXC CloudOps email id.
+
+  rDxcmsSHLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName:  !Sub 'dxcms_sh_lambda_exec_role_${AWS::Region}'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationLambdaRole
+      - Key: Owner
+        Value: DXC
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: "/"
+      Policies:
+        - PolicyName: !Sub "Dxcms-sh-lambda_${AWS::Region}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EC2AccessPermission
+                Action:
+                - ec2:DescribeInstances
+                - ec2:DescribeSnapshots
+                - ec2:DescribeVolumeStatus
+                - ec2:StartInstances
+                - ec2:DescribeScheduledInstanceAvailability
+                - ec2:DescribeVolumes
+                - ec2:CreateTags
+                - ec2:RunInstances
+                - ec2:StopInstances
+                - ec2:DescribeInstanceEventWindows
+                - ec2:DescribeVolumeAttribute
+                - ec2:DescribeImportSnapshotTasks
+                - ec2:DescribeScheduledInstances
+                - ec2:CreateSnapshots
+                - ec2:DescribeFleets
+                - ec2:RunScheduledInstances
+                - ec2:DescribeRegions
+                - ec2:CreateSnapshot
+                - ec2:DescribeInstanceStatus
+                - ec2:RebootInstances
+                - ec2:CopySnapshot
+                - ec2:ReplaceIamInstanceProfileAssociation
+                - ec2:DescribeInstanceTypes
+                - ec2:DescribeInstanceAttribute
+                - ec2:DescribeIamInstanceProfileAssociations
+                - ec2:DescribeTags
+                - ec2:DescribeInstanceEventNotificationAttributes
+                - ec2:CreateInstanceEventWindow
+                - ec2:AssociateIamInstanceProfile
+                - ec2:DeleteSnapshot
+                Resource: "*"
+                Effect: Allow
+                 
+              - Sid: 'SNSAccessPermission'
+                Effect: Allow
+                Action:
+                - sns:ListTopics
+                - sns:ListSubscriptions
+                - sns:CreatePlatformEndpoint
+                - sns:SetTopicAttributes
+                - sns:Publish
+                - sns:Subscribe
+                - sns:ConfirmSubscription
+                - sns:CreateTopic
+                - sns:GetSubscriptionAttributes
+                - sns:ListSubscriptions
+                - sns:GetEndpointAttributes
+                - sns:SetSubscriptionAttributes
+                - sns:ListSubscriptionsByTopic
+                Resource: "*"
+
+              - Sid: 'CloudWatchAccessPermission'
+                Effect: Allow
+                Action:
+                - cloudwatch:GetMetricData
+                Resource: "*"
+
+              - Sid: 'CwLogsAccessPermission'
+                Effect: Allow
+                Action:
+                - logs:CreateLogStream
+                - logs:GetLogEvents
+                - logs:FilterLogEvents
+                - logs:DescribeLogGroups
+                - logs:CreateLogGroup
+                - logs:PutLogEvents
+                - logs:GetLogGroupFields
+                - logs:CreateLogDelivery
+                - logs:GetLogRecord
+                - logs:PutResourcePolicy
+                - logs:GetQueryResults
+                - logs:UpdateLogDelivery
+                - logs:DescribeResourcePolicies
+                - logs:GetLogDelivery
+                - logs:ListLogDeliveries
+                - logs:DescribeLogStreams
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/rDxcmsSH'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/rDxcmsSHBF'
+                  - !Sub 'arn:aws:logs:*:${AWS::AccountId}:log-group:*'
+                  - 'arn:aws:logs:*:*:*'
+
+              - Sid: 'SSMAccessPermission'
+                Effect: Allow
+                Action: 
+                  - ssm:SendCommand
+                  - ssm:CancelCommand
+                  - ssm:ListCommands
+                  - ssm:ListInstanceAssociations
+                  - ssm:DescribeAutomationExecutions
+                  - ssm:DescribeAutomationStepExecutions
+                  - ssm:ListResourceDataSync
+                  - ssm:ListDocuments                                   
+                  - ssm:DescribeDocument
+                  - ssm:ListAssociationVersions
+                  - ssm:GetDocument
+                  - ssm:GetParametersByPath
+                  - ssm:DescribeInstanceInformation
+                  - ssm:ListTagsForResource
+                  - ssm:DescribeDocumentParameters
+                  - ssm:GetParameter                 
+                  - ssm:DescribeParameters                  
+                  - ssm:GetConnectionStatus
+                  - ssm:GetParameters                  
+                  - ssm:PutParameter
+                  - ssm:ListCommandInvocations                 
+                  - ssm:DescribeInstanceAssociationsStatus
+                  - ssm:DescribeInstanceProperties
+                  - ssm:GetDeployablePatchSnapshotForInstance
+                  - ssm:GetParameterHistory
+                  - ssm:DescribeMaintenanceWindowTargets
+                  - ssm:DescribeEffectiveInstanceAssociations
+                  - ssm:DescribeInventoryDeletions
+                  - ssm:GetInventory
+                  - ssm:DescribeActivations
+                  - ssm:GetCommandInvocation                
+                  - ssm:ListAssociations
+                Resource: "*"
+
+              - Sid: 'SESAccessPermission'
+                Effect: Allow
+                Action: 
+                  - ses:SendEmail
+                  - ses:SendTemplatedEmail
+                  - ses:ListVerifiedEmailAddresses
+                  - ses:ListIdentities
+                  - ses:VerifyEmailAddress
+                  - ses:SendRawEmail
+                  - ses:ListIdentityPolicies
+                  - ses:DescribeActiveReceiptRuleSet
+                  - ses:VerifyEmailIdentity
+                  - ses:SendCustomVerificationEmail
+                  - ses:CreateTemplate
+                  - ses:CreateEmailIdentity
+                  - ses:GetIdentityVerificationAttributes
+                  - ses:ListTemplates
+                  - ses:ListCustomVerificationEmailTemplates
+                  - ses:GetCustomVerificationEmailTemplate
+                Resource: "*"
+
+              - Sid: 'secretManager'
+                Effect: Allow
+                Action:
+                - secretsmanager:GetSecretValue
+                Resource: 
+                 - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:DXC-AWSMS-Offerings-SecretKeys*'
+                 - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:DXC-Selfheal-SecretKeys*'
+
+              - Sid: 'IAMPassroleAccessPermission'
+                Effect: Allow
+                Action:
+                - iam:GetRole
+                - iam:PassRole
+                Resource: 
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/dxcms_sh_sfn_exec_role_${AWS::Region}'
+              
+              - Sid: 'IAMAccessPermission'
+                Effect: Allow
+                Action:
+                - iam:ListInstanceProfilesForRole
+                - iam:ListAttachedRolePolicies
+                - iam:ListAttachedUserPolicies
+                - iam:ListRolePolicies
+                - iam:ListInstanceProfiles
+                - iam:AttachRolePolicy
+                - iam:AttachUserPolicy
+                - iam:GetRolePolicy
+                - iam:CreateInstanceProfile
+                - iam:PassRole
+                - iam:GetInstanceProfile
+                - iam:AttachGroupPolicy
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/*rDefaultInstanceProfile*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*rDefaultInstanceRole*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/EC2LinuxLevel1NativeBackup-${AWS::Region}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/EC2LinuxLevel2NativeBackup-${AWS::Region}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/EC2WindowsLevel1NativeBackup-${AWS::Region}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/EC2WindowsLevel2NativeBackup-${AWS::Region}'
+                
+              - Sid: 'IAMAccountAliasesAccessPermission'
+                Effect: Allow
+                Action:
+                - iam:ListAccountAliases
+                - iam:GetInstanceProfile
+                - iam:GetRolePolicy
+                - iam:AttachRolePolicy
+                - iam:PutRolePolicy
+                Resource: "*"
+
+              - Sid: lambdaAccessPermission
+                Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_sh_*'
+
+              - Sid: lambdaListPermission
+                Effect: Allow
+                Action:
+                  - 'lambda:ListFunctions'
+                Resource: "*"
+
+              - Sid: 'BackupAccessPermission'
+                Effect: Allow
+                Action:
+                - backup:DescribeBackupJob
+                - backup:DescribeRecoveryPoint
+                Resource: "*"
+
+              - Sid: DynamoDBAccessPermission
+                Effect: Allow
+                Action:
+                - dynamodb:ListTagsOfResource
+                - dynamodb:DescribeTable
+                - dynamodb:GetItem
+                - dynamodb:BatchGetItem
+                - dynamodb:ConditionCheckItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:CreateTable
+                - dynamodb:UpdateTable
+                - dynamodb:GetRecords
+                - dynamodb:Scan
+                - dynamodb:query
+                - dynamodb:ListTables
+                Resource: 
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_SelfHeal/stream/*"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_SelfHeal/index/*"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_SelfHeal"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AccountFeatureDefinitions"
+
+              - Sid: StateMachineAccessPermission
+                Effect: Allow
+                Action:
+                - states:StartExecution
+                - states:DescribeExecution
+                - states:StopExecution
+                - states:SendTaskSuccess
+                - states:SendTaskFailure
+                - states:DescribeStateMachine
+                - states:ListStateMachines
+                Resource: 
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_sfn*'
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_bf_sfn*'
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_*'
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_Linux_Level2_Backup*'
+
+              - Sid: StateMachineDescribePermission
+                Effect: Allow
+                Action:
+                - states:DescribeExecution
+                - states:DescribeStateMachine
+                Resource: "*"
+            
+  rDxcmsSHStateMachineExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'dxcms_sh_sfn_exec_role_${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'states.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: !Sub 'Dxcms-sf-statemachine_${AWS::Region}'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: GlobalItems
+                Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource: 
+                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_sh_*'
+                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_sh_bf_*'
+                
+              - Sid: 'CloudWatchLogs'
+                Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:GetLogEvents
+                  - logs:PutLogEvents
+                  - logs:UpdateLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutRetentionPolicy
+                  - logs:CreateLogGroup
+                Resource: "*"
+
+              - Sid: 'StateMachineExecution'
+                Effect: Allow
+                Action:
+                  - states:StartExecution
+                  - states:DescribeExecution
+                  - states:StopExecution
+                Resource: 
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_*'
+
+              - Sid: 'BackupAccessPermission'
+                Effect: Allow
+                Action:
+                - backup:DescribeBackupJob
+                - backup:StartBackupJob
+                - backup:DescribeRecoveryPoint
+                Resource: "*"
+
+              - Sid: 'IAMPassRolePermission'
+                Effect: Allow
+                Action:
+                - iam:PassRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/EC2LinuxLevel1NativeBackup-${AWS::Region}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/EC2LinuxLevel2NativeBackup-${AWS::Region}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/EC2WindowsLevel1NativeBackup-${AWS::Region}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/EC2WindowsLevel2NativeBackup-${AWS::Region}'
+
+              - Sid: 'eventbridge'
+                Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                Resource: !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForStepFunctionsExecutionRule'
+
+              - Sid: 'SNSPermission'
+                Effect: Allow
+                Action:
+                - sns:CreatePlatformEndpoint
+                - sns:SetTopicAttributes
+                - sns:UntagResource
+                - sns:Publish
+                - sns:Subscribe
+                - sns:ConfirmSubscription
+                - sns:CreateTopic
+                - sns:GetSubscriptionAttributes
+                - sns:ListSubscriptions
+                - sns:GetEndpointAttributes
+                - sns:SetSubscriptionAttributes
+                Resource: "*"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationSFNRole
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsSHDynamoDBTable: 
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      BillingMode: 'PAY_PER_REQUEST'
+      AttributeDefinitions: 
+        - 
+          AttributeName: "selfHealJobId"
+          AttributeType: "S"
+      KeySchema: 
+        - 
+          AttributeName: "selfHealJobId"
+          KeyType: "HASH"
+      TableName: "Ft_Dxcms_SelfHeal"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationDynamoDbTable
+      - Key: Owner
+        Value: DXC
+      TimeToLiveSpecification:
+        AttributeName: expiry_date
+        Enabled: true
+
+  rDxcmsSHSNSTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    Properties: 
+      Subscription: 
+        - Endpoint: !Ref pCloudOpsEmailID
+          Protocol: 'email'
+        - !Ref 'AWS::NoValue'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationSNSTopic
+      - Key: Owner
+        Value: DXC
+      TopicName: dxcms_sh_sns_notification
+
+  rDxcmsSHChooseSelfHealUseCaseLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: choose_selfheal_usecase.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsSHLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          ec2_backup_failure_sfn_arn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_bf_sfn_diagnosis'
+          cw_agent_failure_sfn_arn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_cw_sfn_diagnosis'
+          cs_agent_failure_sfn_arn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_cs_sfn_diagnosis'
+          ec2_cloudwatch_alarms_sfn_arn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_eca_sfn_diagnosis'
+          ec2_native_backup_failure_sfn_arn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_nbf_sfn_diagnosis'
+          lam_anomaly_detection_sfn_arn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_lad_sfn_diagnosis'
+      Description: 'Lambda to analyse the input and trigger the self heal use case.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/choose_selfheal_usecase.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lam_choose_selfheal_usecase'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHChooseSelfHealUseCaseCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHChooseSelfHealUseCaseLA
+
+  rDxcmsSHWrapperLamToTriggerSfnLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: wrapper_lam_to_trigger_sfn.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsSHLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          step_arn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_sfn_self_heal_master_sfn'
+      Description: 'Lambda to trigger the Self-Heal.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/wrapper_lam_to_trigger_sfn.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lam_wrapper_lam_to_trigger_sfn'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHWrapperLamToTriggerSfnCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHWrapperLamToTriggerSfnLA
+  
+  rDxcmsSHLambdaToTriggerMasterSfnLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: lambda_to_trigger_master_sfn.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsSHLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          sfn_arn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_sfn_self_heal_master_sfn'
+      Description: 'Lambda to trigger the Self-Heal for Ec2 Alarms and Lambda Anomaly'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/lambda_to_trigger_master_sfn.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lambda_to_trigger_master_sfn'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHLambdaToTriggerMasterSfnCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHLambdaToTriggerMasterSfnLA
+  
+  rDxcmsSHTriggerNotificationSfnLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: trigger_notification_sfn.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsSHLambdaExecutionRole
+        - Arn
+      Description: 'Lambda to trigger the notification sfn'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/trigger_notification_sfn.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_trigger_notification_sfn'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHTriggerNotificationSfnCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHTriggerNotificationSfnLA
+
+  rDxcmsSHTriggerNotificationSfnWErrorLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: trigger_notification_sfn_w_error.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsSHLambdaExecutionRole
+        - Arn
+      Description: 'Lambda to trigger the notification sfn if states caught an error'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/trigger_notification_sfn_w_error.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_trigger_notification_sfn_w_error'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCSTriggerNotificationSfnWErrorCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHTriggerNotificationSfnWErrorLA
+
+  rDxcmsshCrossAccountExceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'dxcms_sh_cross_account_exce_role_${AWS::Region}'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsshCrossAccountExceRole
+      - Key: Owner
+        Value: DXC
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: !Sub 'dxcms-selfheal-crossaccount-access_${AWS::Region}'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Sid: 'S3BucketPermission'
+              Effect: Allow
+              Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:ListBucket
+              Resource: 
+                - !Sub 'arn:aws:s3:::${pCloudOpsS3Bucket}'
+                - !Sub 'arn:aws:s3:::${pCloudOpsS3Bucket}/*'
+      
+            - Sid: 'DynamoDBPermission'
+              Effect: Allow
+              Action: 
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:Scan
+              Resource: 
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_SelfHeal'
+            - Sid: 'StepFunctionPermission'
+              Effect: Allow
+              Action:
+                - states:StartExecution
+                - states:DescribeExecution
+                - states:StopExecution
+                - states:SendTaskSuccess
+                - states:SendTaskFailure
+              Resource: 
+                - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh*'
+            - Sid: 'SSMAccessPermission'
+              Effect: Allow
+              Action: 
+                - ssm:GetParameter
+                - ssm:GetParameters
+              Resource: 
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/DXC/Main/CustomerName'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/DXC/SelfHeal/CloudOps_S3_Bucket' 
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsshCrossAccountExceRole
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsSHGenerateReportFromDynamodbLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate_report_from_dynamodb.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsshCrossAccountExceRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsSHDynamoDBTable
+          destination_bucket_name: !Ref rDxcmsSHCloudOpsS3BucketSSMParameter
+          customer_name_parameter: '/DXC/Main/CustomerName'
+      Description: 'Lambda to Create the CSV file for Selfheal.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate_report_from_dynamodb.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_generate_report_from_dynamodb'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSHGenerateReportFromDynamodbLA
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsSHGenerateReportFromDynamodbCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHGenerateReportFromDynamodbLA
+
+  rDxcmsSelfhealScheduleRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Name: dxcms_sh_reporting_event_rule
+      Description: SelfhealScheduleRule
+      ScheduleExpression: cron(0 0 ? * SUN *)
+      State: ENABLED
+      Targets: 
+        - 
+          Arn: !GetAtt
+            - rDxcmsSHReportingSFN
+            - Arn
+          Id: StepfunctionRule
+          RoleArn: !GetAtt 
+            - rDxcmsEventBridgeIAMrole
+            - Arn
+
+  rDxcmsEventBridgeIAMrole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Sub 'dxcms_sh_event_rule_exec_role_${AWS::Region}'
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: !Sub events.amazonaws.com
+              Action: 'sts:AssumeRole'
+        Path: /
+        Policies:
+          - PolicyName: eventbridgepolicy
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - states:StartExecution
+                  Resource:
+                    - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_sfn_reporting'
+
+  rDxcmsSHDynamodbEventLoggingMasterSfnLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: dynamodb_event_logging_master_sfn.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsSHLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsSHDynamoDBTable
+      Description: 'Lambda to log the self heal event in dynamo db.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/dynamodb_event_logging_master_sfn.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lam_dynamodb_event_logging_master_sfn'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHDynamodbEventLoggingMasterSfnCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHDynamodbEventLoggingMasterSfnLA          
+
+  rDxcmsSHCreateSnowIncidentLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: create_snow_incident.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsSHLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          SNS_TOPIC: !Ref pCommonSNOWTopic
+          table_name: !Ref rDxcmsSHDynamoDBTable
+      Description: 'Lambda to create the snow incident.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/create_snow_incident.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_create_snow_incident'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealEC2BackupFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCreateSnowIncidentCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCreateSnowIncidentLA
+
+  rDxcmsSHSelfHealMasterSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms_sh_sfn_self_heal_master_sfn'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/SelfHealMasterSFN/SelfHealMasterSFN.json'
+      DefinitionSubstitutions:
+        dynamodb_logging: !GetAtt
+          - rDxcmsSHDynamodbEventLoggingMasterSfnLA
+          - Arn
+        choose_selfheal_usecase: !GetAtt 
+          - rDxcmsSHChooseSelfHealUseCaseLA
+          - Arn
+        trigger_notification_sfn: !GetAtt
+          - rDxcmsSHTriggerNotificationSfnLA
+          - Arn
+        TriggerNotificationSfnWError: !GetAtt
+          - rDxcmsSHTriggerNotificationSfnWErrorLA
+          - Arn
+        Notify_Failure: !Ref rDxcmsSHSNSTopic
+      RoleArn: !GetAtt 
+        - rDxcmsSHStateMachineExecutionRole
+        - Arn
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsSHSelfHealMasterSFNVendedCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationSFN
+      - Key: Owner
+        Value: DXC
+        
+  rDxcmsSHReportingSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms_sh_sfn_reporting'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/SelfHealReportingSFN/SelfHealReportingSFN.json'
+      DefinitionSubstitutions:
+        GenerateReportFromDynamodb: !GetAtt 
+          - rDxcmsSHGenerateReportFromDynamodbLA
+          - Arn          
+        NotifyForLambdaFunctionFailure: !Ref rDxcmsSHSNSTopic
+      RoleArn: !GetAtt 
+        - rDxcmsSHStateMachineExecutionRole
+        - Arn  
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsSelfHealReportingFailureSFNCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL' 
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsSelfHealReportingFailureSFNCWLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/vendedlogs/rDxcmsSelfHealReportingFailureSFNCWLogGroup"
+
+  rDxcmsSHSelfHealNotificationSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms_sh_sfn_notification'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/SelfHealNotificationSFN/SelfHealNotificationSFN.json'
+      DefinitionSubstitutions:
+        CreateSnowIncident: !GetAtt 
+          - rDxcmsSHCreateSnowIncidentLA
+          - Arn
+        NotifyForLambdaFunctionFailure: !Ref rDxcmsSHSNSTopic
+      RoleArn: !GetAtt 
+        - rDxcmsSHStateMachineExecutionRole
+        - Arn
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsSHSelfHealMasterSFNVendedCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealFoundationSFN
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsSHSelfHealMasterSFNCWLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/DxcmsSelfHealMasterSFNCWLogGroup"
+
+  # AWSPE-6340 When you create a state machine with logging enabled, 
+  # Step Functions must update your CloudWatch Logs resource policy with the 
+  # log group you specify. To avoid reaching the CloudWatch Logs resource policy size limit, 
+  # prefix your CloudWatch Logs log group names with /aws/vendedlogs/
+  rDxcmsSHSelfHealMasterSFNVendedCWLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/vendedlogs/DxcmsSelfHealMasterSFNCWLogGroup"

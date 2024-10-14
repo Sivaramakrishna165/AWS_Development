@@ -1,0 +1,68 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: DXC Managed Services - ECS Cluster Creation - Creates ECS Fargate cluster and enables CPU and Memory monitoring
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Main/pDXCS3BucketName
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+  pPlatformVersion:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Main/pPlatformVersion
+    Description: "[DO NOT CHANGE] SSM Parameter for platform version"
+  pClusterName:
+    Type: String
+    Description: "Enter the Cluster name"
+    Default: ""
+  pContainerInsights:
+    Type: String
+    Description: "Enables the Container Insights"
+    Default: disabled
+    AllowedValues:
+      - enabled
+      - disabled
+  pApplyClusterMonitoring:
+    Type: String
+    Description: "Enables CPU and Memory monitoring for the Cluster"
+    Default: true
+    AllowedValues:
+      - true
+      - false
+
+Resources:
+  rCluster:
+    Type: "AWS::ECS::Cluster"
+    Properties:
+      ClusterName: !Ref pClusterName
+      CapacityProviders: 
+        - FARGATE
+        - FARGATE_SPOT
+      ClusterSettings:
+        - Name: containerInsights
+          Value: !Ref pContainerInsights
+      Tags:
+        - Key: Application 
+          Value: !Ref 'AWS::StackName'
+        - Key: Owner 
+          Value: DXC
+        - Key: Name
+          Value: !Ref pClusterName
+
+Outputs:
+  oECSFargateClusterArn:
+    Description: ARN of the created cluster.
+    Value:
+      Fn::GetAtt: 
+      - rCluster
+      - Arn
+  oECSFargateClusterName:
+    Description: Name of the ECS Cluster
+    Value: !Ref rCluster

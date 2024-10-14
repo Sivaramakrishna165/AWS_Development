@@ -1,0 +1,130 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'A regional template used map the account to Master Payer account'
+Parameters:
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/AWSOrgsMapAccToMP/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pHandshakeId:
+    Description: 'Handshake Id created in Master Account'
+    Type: String
+    Default: ''
+  pCloudOpsEmailID:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Notification/DXCNotifyEmail
+    Description: SSM Parameter contains the CloudOps Email_Ids
+  pOperateMode:
+    Description: 'Accept/Decline the invitation created by AWS Orgs Master Payer account'
+    Type: String
+    Default: 'ACCEPT_INVITATION'
+    AllowedValues: ['ACCEPT_INVITATION','REJECT_INVITATION']
+
+Conditions:
+  cMapAccToMp: !Not [!Equals ['', !Ref pHandshakeId]]
+
+Resources:
+  rDxcmsAddAcctoMpTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      Subscription: 
+        - Endpoint: !Ref pCloudOpsEmailID
+          Protocol: 'email'
+        - !Ref 'AWS::NoValue'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+      TopicName: DXCMS-Add-Acc-To-MP
+
+  rDxcmsMapAccToMPRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsMapAccToMPRole
+      - Key: Owner
+        Value: DXC
+      Policies:
+        - PolicyName: !Join ["-", ["DxcmsMapAccToMPPerms", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-map-acc-to-mp-${AWS::Region}:*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:DXCMS-Add-Acc-To-MP'
+              - Effect: Allow
+                Action:
+                  - organizations:AcceptHandshake
+                  - organizations:DeclineHandshake
+                  - iam:CreateServiceLinkedRole 
+                Resource: "*"
+
+  rDxcmsMapAccToMP:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "dxcms-map-acc-to-mp-${AWS::Region}"
+      Environment:
+        Variables:
+          STACK_REGION: !Sub '${AWS::Region}'
+          EXECUTION_ACCOUNT: !Sub '${AWS::AccountId}'
+          AddAcctoMpTopic: !Ref rDxcmsAddAcctoMpTopic
+          FtName: MapAccountToMasterPayer
+          ADSTable: 'AccountFeatureDefinitions'
+      Description: 'Lambda to map the account to Master Payer account'
+      Runtime: python3.11
+      Handler: dxcms_map_account_to_master_payer.handler
+      MemorySize: 128
+      Role: !GetAtt rDxcmsMapAccToMPRole.Arn
+      Timeout: 900
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/map_account_to_master_payer.zip"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: !Sub "dxcms-map-acc-to-mp-${AWS::Region}"
+      - Key: Owner
+        Value: DXC
+
+  customMapAccToMp:
+    Condition: cMapAccToMp
+    Type: Custom::MapAccToMp
+    DependsOn: rDxcmsMapAccToMP
+    Properties:
+        ServiceToken: !Join ["", ["arn:aws:lambda:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":function:dxcms-map-acc-to-mp-", !Ref "AWS::Region"]]
+        HandshakeId: !Ref pHandshakeId
+        Mode: !Ref pOperateMode

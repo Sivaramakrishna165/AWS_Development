@@ -1,0 +1,60 @@
+---
+# Feature Definition (FD) for AWSSageMakerMonitoring
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AWSSageMakerMonitoring
+Version: '9.0.0.2'
+StandardCreationBatch: 3
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creating the cloudwatch alarms for Sage Maker service.
+FeatureParams:
+  pCommonIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priroity fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+Alarms:
+  Invocation4XXErrors_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: EndpointName
+      Value: <TO BE FILLED>
+    - Name: VariantName
+      Value: <TO BE FILLED>
+    EvaluationPeriods: 1
+    MetricName: Invocation4XXErrors
+    Namespace: AWS/SageMaker
+    Period: 60
+    Statistic: Sum
+    Threshold: 0
+
+  Invocation5XXErrors_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: EndpointName
+      Value: <TO BE FILLED>
+    - Name: VariantName
+      Value: <TO BE FILLED>
+    EvaluationPeriods: 1
+    MetricName: Invocation5XXErrors
+    Namespace: AWS/SageMaker
+    Period: 60
+    Statistic: Sum
+    Threshold: 0
+
+
+ResourceDeployment:
+  - aws_sage_maker_monitoring.yaml
+DepensOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities

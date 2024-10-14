@@ -1,0 +1,27 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: Checks whether detailed monitoring is enabled for EC2 instances.
+
+Parameters:
+  pFeatureVersion:
+      Type: String
+      Default: 'None'
+      Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+
+  pDXCS3KeyPrefix:
+      Type: String
+      Default: 'None'
+      Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+Resources:
+  rAWSConfigRule:
+    Type: 'AWS::Config::ConfigRule'
+    Properties:
+      Description: "Checks whether detailed monitoring is enabled
+        for EC2 instances."
+      Scope:
+        ComplianceResourceTypes:
+          - 'AWS::EC2::Instance'
+      Source:
+        Owner: AWS
+        SourceIdentifier: EC2_INSTANCE_DETAILED_MONITORING_ENABLED

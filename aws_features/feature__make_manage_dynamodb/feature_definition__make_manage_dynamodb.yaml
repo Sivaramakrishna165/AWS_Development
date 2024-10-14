@@ -1,0 +1,19 @@
+---
+# Feature Definition (FD) for the dynamodb Make Manage
+# Partition Key = Feature
+# No sort key needed
+
+Feature: MakeManageDynamodb
+Version: '9.0.0.3'
+StandardCreationBatch: 3
+EnableFeature: true
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creates required resources for make manage functionality to execute
+AllowDisable: true
+ResourceDeployment:
+  - make_manage_dynamodb.yaml

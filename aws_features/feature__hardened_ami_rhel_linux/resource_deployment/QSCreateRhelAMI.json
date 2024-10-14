@@ -1,0 +1,680 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Creates Red Hat Enterprise Linux AMI",
+  "Parameters": {
+    "pDXCS3BucketName": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/DXC/Main/pDXCS3BucketName",
+      "Description": "[DO NOT CHANGE] SSM Parameter for bucket location"
+    },
+    "pDXCS3AWSPEDownloadsBucket": {
+      "Type": "String",
+      "Default": "awspe-downloads",
+      "Description": "awspe downloads bucket"
+    },
+    "pUnixSoeHardeningDoc": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/DXC/UnixSoeHardeningDoc/UnixSoeHardeningDocPath",
+      "Description": "Unix SOE Hardening Document Name."
+    },
+    "pDXCServiceTier": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/DXC/Main/pDXCServiceTier",
+      "Description": "SSM Parameter for Platform Service Tier."
+    },
+    "pFeatureVersion": {
+      "Type": "String",
+      "Default": "None",
+      "Description": "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+    },
+    "pDXCS3KeyPrefix": {
+      "Type": "String",
+      "Default": "None",
+      "Description": "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+    },
+    "pAmisRetentionPeriod": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/DXC/Main/AmisRetentionPeriod",
+      "Description": "SSM Parameter for Length of Time to Retain Hardened Amis."
+    }
+  },
+  "Mappings": {
+    "OSServiceLevelMap": {
+      "Gold": {
+        "OSServiceLevel" : "GOLD"
+      },
+      "SilverPlus": {
+        "OSServiceLevel" : "SILVERPLUS"
+      }
+    }
+  },
+  "Resources": {
+    "rManagedInstanceRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ssm.amazonaws.com",
+                  "ec2.amazonaws.com"
+                ]
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+          "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+          "arn:aws:iam::aws:policy/service-role/AmazonSSMMaintenanceWindowRole"
+        ],
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "ec2TagImage",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeImages",
+                    "ec2:CreateTags",
+                    "ec2:DescribeInstanceStatus"                    
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:PutObject",
+                    "s3:GetObject",
+                    "s3:ListBucket"
+                  ],
+                  "Resource": [
+                    {"Fn::Join": ["", ["arn:aws:s3:::","dxc.customer.config-", {"Ref": "AWS::AccountId"}, "-", {"Ref": "AWS::Region"}]]},
+                    {"Fn::Join": ["", ["arn:aws:s3:::","dxc.customer.config-", {"Ref": "AWS::AccountId"}, "-", {"Ref": "AWS::Region"},"/*"]]},
+                    {"Fn::Join": ["", ["arn:aws:s3:::",{"Ref": "pDXCS3AWSPEDownloadsBucket"}]]},
+                    {"Fn::Join": ["", ["arn:aws:s3:::",{"Ref": "pDXCS3AWSPEDownloadsBucket"},"/*"]]}
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "rManagedInstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [
+          {
+            "Ref": "rManagedInstanceRole"
+          }
+        ]
+      },
+      "DependsOn": "rManagedInstanceRole"
+    },
+    "rAutomationServiceRole": {
+      "Type": "AWS::IAM::Role",
+      "DependsOn": "rManagedInstanceRole",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ssm.amazonaws.com",
+                  "ec2.amazonaws.com"
+                ]
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole"
+        ],
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "passrole",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "iam:PassRole"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": "rManagedInstanceRole.Arn"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "rGetSourceImage": {
+      "Type": "Custom::rGetSourceImage",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::Join": ["", ["arn:aws:lambda:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":function:getSourceImage"]]
+        },
+        "OSName": "rhel9.0",
+        "BucketName": {
+          "Ref": "pDXCS3BucketName"
+        },
+        "Region": {
+          "Ref": "AWS::Region"
+        }
+      }
+    },
+	"rGetAllSourceImage": {
+      "Type": "Custom::rGetAllSourceImage",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::Join": ["", ["arn:aws:lambda:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":function:getSourceImage"]]
+        },
+        "OSName": "rhel",
+        "BucketName": {
+          "Ref": "pDXCS3BucketName"
+        },
+        "Region": {
+          "Ref": "AWS::Region"
+        }
+      }
+    },
+    "rRhel90AMICreationAutomation": {
+      "Type": "AWS::SSM::Document",
+      "DependsOn": [
+        "rAutomationServiceRole",
+        "rManagedInstanceProfile"
+      ],
+      "Properties": {
+        "DocumentType": "Automation",
+        "Content": {
+          "schemaVersion": "0.3",
+          "description": "Updates AMI with Linux distribution packages and Amazon software. For details,see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/sysman-ami-walkthrough.html.",
+          "assumeRole": {
+            "Fn::GetAtt": "rAutomationServiceRole.Arn"
+          },
+          "parameters": {
+            "AvailableSourceAmiId": {
+              "type": "String",
+              "description": "These are the available AMI Id's for selected Region and OS. Please use these to fill up SourceAmiId.",
+              "default": {
+                "Fn::GetAtt": [
+                  "rGetSourceImage",
+                  "Image"
+                ]
+              }
+            },
+            "SourceAmiId": {
+              "type": "String",
+              "description": "(REQUIRED) Refer AvailableSourceAmiId section to get correct AMI Id for your OS.",
+              "default": "<Enter-AMI-Id>"
+            },
+            "TargetAmiName": {
+              "type": "String",
+			        "description": "(Optional) The name of the new AMI that will be created. Default is a system-generated string including 'QS-CoRE-RHEL', and the creation time and date.",
+              "default" : "QS-CoRE-RHEL"
+            },
+            "InstanceType": {
+              "type": "String",
+              "description": "(Optional) Type of instance to launch as the workspace host. Instance types vary by region. Default is t2.micro.",
+              "default": "t2.large"
+            },
+            "IncludePackages": {
+              "type": "String",
+              "description": "(Optional) Only update these named packages. By default (\"all\"), all available updates are applied.",
+              "default": "all"
+            },
+            "ExcludePackages": {
+              "type": "String",
+              "description": "(Optional) Names of packages to hold back from updates, under all conditions. By default (\"none\"), no package is excluded.",
+              "default": "none"
+            },
+            "OSName":{
+                        "type":"String",
+                        "allowedValues":[
+                           "rhel9.0"
+                        ],
+                        "default": "rhel9.0"
+            },
+            "AMIVersion": {
+              "type": "String",
+              "description": "Represents version of the AMI. Useful when there are multiple AMIs of an operating system in a region.",
+              "default": "v1.0"
+            },
+            "Environment" : {
+              "type" : "String",
+              "description": "(Required) Represents AMI Environment. Allowed values are ['QA', 'Staging', 'Production']",
+              "allowedValues" : [ "QA", "Staging", "Production" ]
+            },
+            "Encryption": {
+              "allowedValues": [
+                "true",
+                "false"
+              ],
+              "default": "false",
+              "description": "Set True for root volume encryption",
+              "type": "String"
+            },
+            "CustomerBucket": {
+              "type": "String",
+              "description": "Bucket name where runCommand outputs are saved. By default they are saved in customer config bucket.",
+              "default": {
+                "Fn::Join": ["", ["dxc.customer.config-", {"Ref": "AWS::AccountId"}, "-", {"Ref": "AWS::Region"}]]
+              }
+            },
+            "RetentionPeriod": {
+              "type": "String",
+              "default": { "Ref" : "pAmisRetentionPeriod" },
+              "description": "Retention period of the Custom AMI"
+            }            
+          },
+          "mainSteps": [
+            {
+              "maxAttempts": 3,
+              "inputs": {
+                "Service": "ssm",
+                "Api": "get_parameter",
+                "Name": "/DXC/Hardening/SubnetId"
+              },
+              "name": "GetSubnetId",
+              "action": "aws:executeAwsApi",
+              "timeoutSeconds": 1200,
+              "onFailure": "Abort",
+              "outputs": [
+                {
+                  "Name": "SubnetId",
+                  "Selector": "$.Parameter.Value",
+                  "Type": "String"
+                }
+              ]
+            },
+            {
+              "maxAttempts": 3,
+              "inputs": {
+                "Service": "ssm",
+                "Api": "get_parameter",
+                "Name": "/DXC/Hardening/SecurityGroupId"
+              },
+              "name": "GetSecurityGroup",
+              "action": "aws:executeAwsApi",
+              "timeoutSeconds": 1200,
+              "onFailure": "Abort",
+              "outputs": [
+                {
+                  "Name": "SecurityGroup",
+                  "Selector": "$.Parameter.Value",
+                  "Type": "String"
+                }
+              ]
+            },
+            {
+              "maxAttempts": 3,
+              "inputs": {
+                "Service": "ssm",
+                "Api": "get_parameter",
+                "Name": "/DXC/Hardening/KeyPair"
+              },
+              "name": "GetKeyPair",
+              "action": "aws:executeAwsApi",
+              "timeoutSeconds": 1200,
+              "onFailure": "Abort",
+              "outputs": [
+                {
+                  "Name": "KeyName",
+                  "Selector": "$.Parameter.Value",
+                  "Type": "String"
+                }
+              ]
+            },
+            {
+              "name": "launchInstance",
+              "action": "aws:runInstances",
+              "maxAttempts": 3,
+              "timeoutSeconds": 1200,
+              "onFailure": "Abort",
+              "inputs": {
+                "KeyName": "{{GetKeyPair.KeyName}}",
+                "ImageId": "{{SourceAmiId}}",
+                "InstanceType": "{{InstanceType}}",
+                "UserData": "IyEvYmluL2Jhc2gKCiMhL2Jpbi9iYXNoCgojIFRoaXMgaXMgYW4gdXBkYXRlZCB2ZXJzaW9uIG9mIHRoZSBhd3MtaW5zdGFsbC1zc20tYWdlbnQKIyBzY3JpcHQgdGhhdCBzdXBwb3J0cyBTVVNFLgoKZnVuY3Rpb24gZGllKCkgewogICAgZWNobyAiJEAsIGV4aXRpbmcuIiA+JjIKICAgIGV4aXQgMQp9CgpmdW5jdGlvbiBnZXRfY29udGVudHMoKSB7CiAgICBpZiBbIC14ICIkKHdoaWNoIGN1cmwpIiBdOyB0aGVuCiAgICAgICAgY3VybCAtcyAtZiAiJDEiCiAgICBlbGlmIFsgLXggIiQod2hpY2ggd2dldCkiIF07IHRoZW4KICAgICAgICB3Z2V0ICIkMSIgLU8gLQogICAgZWxzZQogICAgICAgIGRpZSAiTm8gZG93bmxvYWQgdXRpbGl0eSAoY3VybCwgd2dldCkiCiAgICBmaQp9CgpmdW5jdGlvbiBnZXRfcmVnaW9uKCkgewogICAgdXJsPScgaHR0cDovLzE2OS4yNTQuMTY5LjI1NC9sYXRlc3QvbWV0YS1kYXRhL3BsYWNlbWVudC9hdmFpbGFiaWxpdHktem9uZScKICAgIGlmIFsgLXggIiQod2hpY2ggY3VybCkiIF07IHRoZW4KICAgICAgICByZWdpb249YGN1cmwgdXJsYAogICAgICAgIHJlZ2lvbj0ke3JlZ2lvbiU/fQogICAgZWxpZiBbIC14ICIkKHdoaWNoIHdnZXQpIiBdOyB0aGVuCiAgICAgICAgcmVnaW9uPSd3Z2V0IHVybCcKICAgICAgICByZWdpb249JHtyZWdpb24lP30KICAgIGVsc2UKICAgICAgICBkaWUgIk5vIGRvd25sb2FkIHV0aWxpdHkgKGN1cmwsIHdnZXQpIgogICAgZmkKCn0KCmZ1bmN0aW9uIGlzc3VlX21hdGNoKCkgewogICAgZ3JlcCAtRSAtaSAtYyAiJDEiIC9ldGMvaXNzdWUgMj4mMSAmPi9kZXYvbnVsbAogICAgWyAkPyAtZXEgMCBdICYmIGVjaG8gInRydWUiIHx8IGVjaG8gImZhbHNlIgp9CgpmdW5jdGlvbiBpc19kZWJ1bnR1KCkgewogICAgZWNobyAiJChpc3N1ZV9tYXRjaCAnRGViaWFufFVidW50dScpIgp9CgpmdW5jdGlvbiBpc191YnVudHUoKSB7CiAgICBlY2hvICIkKGlzc3VlX21hdGNoICdVYnVudHUnKSIKfQoKZnVuY3Rpb24gaXNfcmVkaGF0KCkgewogICAgaWYgWyAtZiAiL2V0Yy9zeXN0ZW0tcmVsZWFzZSIgXSB8fAogICAgICAgIFsgLWYgIi9ldGMvcmVkaGF0LXJlbGVhc2UiIF07IHRoZW4KICAgICAgICBlY2hvICJ0cnVlIgogICAgZWxzZQogICAgICAgIGVjaG8gImZhbHNlIgogICAgZmkKfQoKZnVuY3Rpb24gaXNfc3VzZSgpIHsKICAgIGlmIFsgLWYgIi9ldGMvb3MtcmVsZWFzZSIgXSB8fAogICAgICAgIFsgLWYgIi9ldGMvU3VTRS1yZWxlYXNlIiBdOyB0aGVuCiAgICAgICAgZWNobyAidHJ1ZSIKICAgIGVsc2UKICAgICAgICBlY2hvICJmYWxzZSIKICAgIGZpCn0KCmZ1bmN0aW9uIGdldF91YnVudHVfbWFqb3IoKSB7CiAgICBsc2JfcmVsZWFzZSAtLXJlbGVhc2UgfCBjdXQgLWYgMiB8IGN1dCAtZCAnLicgLWYgMQp9CgpmdW5jdGlvbiBnZXRfYXJjaCgpIHsKICAgIGlmIFsgIiQodW5hbWUgLW0pIiA9PSAieDg2XzY0IiBdOyB0aGVuCiAgICAgICAgZWNobyAiYW1kNjQiCiAgICBlbGlmIFtbICIkKHVuYW1lIC1tKSIgPX4gaVszLTZdODYgXV07IHRoZW4KICAgICAgICBlY2hvICIzODYiCiAgICBlbHNlCiAgICAgICAgZGllICJVbnN1cHBvcnRlZCBhcmNoaXRlY3R1cmUgJCh1bmFtZSAtbSkiCiAgICBmaQp9CgpmdW5jdGlvbiBnZXRfcGFja2FnZV90eXBlKCkgewogICAgaWYgWyAiJChpc19kZWJ1bnR1KSIgPT0gInRydWUiIF07IHRoZW4KICAgICAgICBlY2hvICJkZWIiCiAgICBlbGlmIFsgIiQoaXNfcmVkaGF0fGlzX3N1c2UpIiA9PSAidHJ1ZSIgXTsgdGhlbgogICAgICAgIGVjaG8gInJwbSIKICAgIGZpCn0KCmZ1bmN0aW9uIGdldF9kaXN0KCkgewogICAgaWYgWyAiJChpc19kZWJ1bnR1KSIgPT0gInRydWUiIF07IHRoZW4KICAgICAgICBlY2hvICJkZWJpYW4iCiAgICBlbGlmIFsgIiQoaXNfcmVkaGF0fGlzX3N1c2UpIiA9PSAidHJ1ZSIgXTsgdGhlbgogICAgICAgIGVjaG8gImxpbnV4IgogICAgZWxzZQogICAgICAgIGRpZSAiVW5rbm93biBkaXN0cmlidXRpb24iCiAgICBmaQp9CgpmdW5jdGlvbiBnZXRfc3NtX2FnZW50KCkgewogICAgZXh0ZW5zaW9uPSIkKGdldF9wYWNrYWdlX3R5cGUpIgogICAgZGlzdD0iJChnZXRfZGlzdCkiCiAgICBhcmNoPSIkKGdldF9hcmNoKSIKCiAgICByZWFkb25seSBJREVOVElUWV9VUkw9Imh0dHA6Ly8xNjkuMjU0LjE2OS4yNTQvMjAxNi0wNi0zMC9keW5hbWljL2luc3RhbmNlLWlkZW50aXR5L2RvY3VtZW50LyIKICAgIHJlYWRvbmx5IFRSVUVfUkVHSU9OPSQoZ2V0X3JlZ2lvbikKICAgIHJlYWRvbmx5IERFRkFVTFRfUkVHSU9OPSJ1cy1lYXN0LTEiCiAgICByZWFkb25seSBSRUdJT049IiR7VFJVRV9SRUdJT046LSRERUZBVUxUX1JFR0lPTn0iCgogICAgZWNobyAiZXh0ZW5zaW9uOiAkZXh0ZW5zaW9uIgogICAgZWNobyAiZGlzdDogJGRpc3QiCiAgICBlY2hvICJhcmNoOiAkYXJjaCIKICAgIGVjaG8gIlJFR0lPTjogJFJFR0lPTiIKCiAgICBwYWNrYWdlPSJhbWF6b24tc3NtLWFnZW50LiRleHRlbnNpb24iCiAgICB1cmxfYmFzZT0iaHR0cHM6Ly9hbWF6b24tc3NtLSRSRUdJT04uczMuJFJFR0lPTi5hbWF6b25hd3MuY29tIgogICAgdXJsPSIke3VybF9iYXNlfS9sYXRlc3QvJHtkaXN0fV8ke2FyY2h9LyR7cGFja2FnZX0iCgogICAgZWNobyAidXJsOiAkdXJsIgoKICAgIGdldF9jb250ZW50cyAiJHVybCIgPiAiJHBhY2thZ2UiCgogICAgaWYgWyAhIC1mICIkcGFja2FnZSIgXTsgdGhlbgogICAgICAgIGRpZSAiQ291bGQgbm90IGRvd25sb2FkIHRoZSBwYWNrYWdlIGZyb20gJHVybCIKICAgIGZpCn0KCmZ1bmN0aW9uIHN0YXJ0X3NzbV9hZ2VudCgpIHsKICAgIGlmIFsgIiQoaXNfdWJ1bnR1KSIgPT0gImZhbHNlIiBdOyB0aGVuCiAgICAgICAgcmV0dXJuCiAgICBmaQoKICAgIGNhc2UgIiQoZ2V0X3VidW50dV9tYWpvcikiIGluCiAgICAgICAgMTYpCiAgICAgICAgICAgIHN5c3RlbWN0bCBzdGFydCBhbWF6b24tc3NtLWFnZW50CiAgICAgICAgICAgIDs7CiAgICAgICAgMTQpCiAgICAgICAgICAgIHN0YXJ0IGFtYXpvbi1zc20tYWdlbnQKICAgICAgICAgICAgOzsKICAgICAgICAqKQogICAgICAgICAgICBkaWUgIlVua25vd24gbWFqb3IgcmV2aXNpb24gJChnZXRfdWJ1bnR1X21ham9yKSIKICAgIGVzYWMKfQoKZnVuY3Rpb24gaW5zdGFsbF9zc21fYWdlbnQoKSB7CiAgICBpZiBbICIkKGlzX2RlYnVudHUpIiA9PSAidHJ1ZSIgXTsgdGhlbgogICAgICAgIGRwa2cgLWkgYW1hem9uLXNzbS1hZ2VudC5kZWIKICAgIGVsaWYgWyAiJChpc19yZWRoYXQpIiA9PSAidHJ1ZSIgXTsgdGhlbgogICAgICAgIHl1bSBpbnN0YWxsIC0tbm9ncGdjaGVjayAteSBhbWF6b24tc3NtLWFnZW50LnJwbQogICAgZWxpZiBbICIkKGlzX3N1c2UpIiA9PSAidHJ1ZSIgXTsgdGhlbgogICAgICAgIHJwbSAtLWluc3RhbGwgYW1hem9uLXNzbS1hZ2VudC5ycG0KICAgIGVsc2UKICAgICAgICBkaWUgIlVua25vd24gZGlzdHJpYnV0aW9uIgogICAgZmkKCiAgICBpZiBbICEgLXggIiQod2hpY2ggYW1hem9uLXNzbS1hZ2VudCkiIF07IHRoZW4KICAgICAgICBkaWUgIk5vIFNTTSBhZ2VudCB3YXMgaW5zdGFsbGVkIgogICAgZmkKfQoKZnVuY3Rpb24gbWFpbigpIHsKICAgIGNkIC90bXAKICAgIGdldF9zc21fYWdlbnQKICAgIGluc3RhbGxfc3NtX2FnZW50CiAgICBzdGFydF9zc21fYWdlbnQKfQoKIyBJbnN0YWxsIGRlcGVuZGVuY2llcwp5dW0gaW5zdGFsbCAteSB1bnppcApjdXJsICJodHRwczovL3MzLmFtYXpvbmF3cy5jb20vYXdzLWNsaS9hd3NjbGktYnVuZGxlLnppcCIgLW8gIi90bXAvYXdzY2xpLWJ1bmRsZS56aXAiCnVuemlwIC90bXAvYXdzY2xpLWJ1bmRsZS56aXAgLWQgL3RtcC8KL3RtcC9hd3NjbGktYnVuZGxlL2luc3RhbGwgLWIgL3Vzci9iaW4vYXdzCgojIEdldCB0aGUgbWFqb3IgdmVyaW9uIG51bWJlcgojIElmIHRoaXMgaXMgUkhFTDYgaW5zdGFsbCBweXRob24yLjcKUkhFTF9NQUpPUl9WRVNJT049JChzZWQgLXJlICdzLy57NDB9Ly87cy8uezEzfSQvLycgL2V0Yy9yZWRoYXQtcmVsZWFzZSkKCmlmIFtbICRSSEVMX01BSk9SX1ZFU0lPTiA9PSA2KiBdXTsgdGhlbgogIHl1bSBpbnN0YWxsIC15IGdjYyBvcGVuc3NsLWRldmVsIGJ6aXAyLWRldmVsCiAgeXVtIHVwZGF0ZSAteSBjdXJsIG5zcwogIGNkIC91c3Ivc3JjCiAgd2dldCBodHRwczovL3d3dy5weXRob24ub3JnL2Z0cC9weXRob24vMi43LjE2L1B5dGhvbi0yLjcuMTYudGd6CiAgdGFyIC16eHZmIFB5dGhvbi0yLjcuMTYudGd6CiAgY2QgUHl0aG9uLTIuNy4xNgogIC4vY29uZmlndXJlIC0tZW5hYmxlLW9wdGltaXphdGlvbnMKICBtYWtlIGFsdGluc3RhbGwKICBjdXJsICJodHRwczovL2Jvb3RzdHJhcC5weXBhLmlvL2dldC1waXAucHkgIiAtbyAiZ2V0LXBpcC5weSIKICAvdXNyL2xvY2FsL2Jpbi9weXRob24yLjcgZ2V0LXBpcC5weQogIC91c3IvbG9jYWwvYmluL3BpcCBpbnN0YWxsIGF3c2NsaQogIGV4cG9ydCBQQVRIPSRQQVRIOi91c3IvbG9jYWwvYmluCmZpCgptYWluICRAIDI+JjEgfCB0ZWUgL3RtcC9hd3MtaW5zdGFsbC1zc20tYWdlbnQubG9n",
+                "MinInstanceCount": 1,
+                "MaxInstanceCount": 1,
+                "BlockDeviceMappings": [
+                  {
+                    "DeviceName": "/dev/sda1",
+                    "Ebs": {
+                      "Encrypted": "{{Encryption}}"                     
+                    }
+                  }
+                ],
+                "IamInstanceProfileName": {
+                  "Ref": "rManagedInstanceProfile"
+                },
+                "SubnetId": "{{ GetSubnetId.SubnetId }}",
+                "SecurityGroupIds": [
+                  "{{ GetSecurityGroup.SecurityGroup }}"
+                ],
+                "TagSpecifications":[
+                  {
+                    "ResourceType":"instance",
+                    "Tags":[
+                      {
+                        "Key":"PatchGroup",
+                        "Value": "dxcms-{{OSName}}-patch-group"
+                      }
+                    ]
+                  }
+                ] 
+              }
+            },
+            {
+              "name": "updateSoftwareToSupportLinuxPatching",
+              "action": "aws:runCommand",
+              "maxAttempts": 3,
+              "timeoutSeconds": 3600,
+              "onFailure": "Abort",
+              "inputs": {
+                "DocumentName": "AWS-RunShellScript",
+                "InstanceIds": [
+                  "{{launchInstance.InstanceIds}}"
+                ],
+                "OutputS3BucketName": "{{CustomerBucket}}",
+                "OutputS3KeyPrefix": "ami-creation/rhel/updateSoftwareToSupportLinuxPatching-{{global:DATE_TIME}}",
+                "Parameters": {
+                  "commands": [
+                    "#!/bin/bash \n",
+                    "version=`uname -mr` \n",
+                    "echo \"linux version $version \" \n",
+                    "if [[ \"$version\" == 2* ]]; then \n",
+                    "   echo \"not installing Powershell as RHEL version is 6.X but we are upgrading the ssm agent\" \n",
+                    "   if rpm -qa | grep amazon-ssm-agent; then \n",
+                    "       echo \"trying to update amazon-ssm-agent\" \n",
+                    "       yum update -y https://s3.{{global:REGION}}.amazonaws.com/amazon-ssm-{{global:REGION}}/latest/linux_amd64/amazon-ssm-agent.rpm \n",
+                    "   else \n",
+                    "       echo \"amazon-ssm-agent not on box installing\" \n",
+                    "       yum install -y https://s3.{{global:REGION}}.amazonaws.com/amazon-ssm-{{global:REGION}}/latest/linux_amd64/amazon-ssm-agent.rpm \n",
+                    "   fi \n",
+                    "elif [[ \"$version\" == 3* ]]; then \n",
+                    "   echo \"Installing Powershell on RHEL 7 version instance and upgrading the ssm agent \" \n",
+                    "   if rpm -qa | grep powershell-6.0.0_beta.7-1.el7.x86_64; then \n",
+                    "      echo \"powershell already on instance \" \n",
+                    "   else \n",
+                    "      cd /tmp \n",
+                    "      echo \"powershell NOT already on instance\" \n",
+                    "      aws s3 cp s3://{{CustomerBucket}}/deploy/documents/powershell-6.0.0_beta.7-1.el7.x86_64.rpm /tmp/powershell-6.0.0_beta.7-1.el7.x86_64.rpm --region {{global:REGION}}\n",
+                    "      yum install -y /tmp/powershell-6.0.0_beta.7-1.el7.x86_64.rpm \n",
+                    "   fi \n",
+                    "   if rpm -qa | grep amazon-ssm-agent; then \n",
+                    "       echo \"trying to update amazon-ssm-agent\" \n",
+                    "       yum update -y https://s3.{{global:REGION}}.amazonaws.com/amazon-ssm-{{global:REGION}}/latest/linux_amd64/amazon-ssm-agent.rpm \n",
+                    "   else \n",
+                    "       echo \"amazon-ssm-agent not on box installing\" \n",
+                    "       yum install -y https://s3.{{global:REGION}}.amazonaws.com/amazon-ssm-{{global:REGION}}/latest/linux_amd64/amazon-ssm-agent.rpm \n",
+                    "   fi \n",
+                    "fi \n"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "installCloudWatchAgent",
+              "action": "aws:runCommand",
+              "maxAttempts": 3,
+              "timeoutSeconds": 3600,
+              "onFailure": "Abort",
+              "inputs": {
+                "DocumentName": "AWS-RunShellScript",
+                "InstanceIds": [
+                  "{{ launchInstance.InstanceIds }}"
+                ],
+                "Parameters": {
+                  "commands": [
+                    "set -e",
+                    "[ -x \"$(which wget)\" ] && get_contents='wget $1 -O -'",
+                    "[ -x \"$(which curl)\" ] && get_contents='curl -s -f $1'",
+                    "eval $get_contents https://s3.{{global:REGION}}.amazonaws.com/amazoncloudwatch-agent-{{global:REGION}}/linux/amd64/latest/AmazonCloudWatchAgent.zip > /tmp/AmazonCloudWatchAgent.zip",
+                    "cw_agent_dir='AmazonCloudWatchAgent'",
+                    "if [ ! -d \"/tmp/$cw_agent_dir\" ]; then",
+                    "  unzip -o /tmp/AmazonCloudWatchAgent.zip -d /tmp/$cw_agent_dir",
+                    "  cd /tmp/$cw_agent_dir && bash install.sh",
+                    "fi"
+                  ]
+                },
+                "OutputS3BucketName" : "{{CustomerBucket}}",
+                "OutputS3KeyPrefix": "ami-creation/rhel/installCloudWatchAgent-{{global:DATE_TIME}}"
+              }
+            },
+            {
+              "name": "installUnixSoeHardening",
+              "action": "aws:runCommand",
+              "maxAttempts": 3,
+              "timeoutSeconds": 3600,
+              "onFailure": "Abort",
+              "inputs": {
+                "DocumentName": {
+                  "Ref": "pUnixSoeHardeningDoc"
+                },
+                "InstanceIds": [
+                  "{{ launchInstance.InstanceIds }}"
+                ],
+                "Parameters": {},
+                "OutputS3BucketName": "{{CustomerBucket}}",
+                "OutputS3KeyPrefix": "ami-creation/rhel/installUnixSoeHardening-{{global:DATE_TIME}}"
+              }
+            },
+            {
+              "name": "stopInstance",
+              "action": "aws:changeInstanceState",
+              "maxAttempts": 3,
+              "timeoutSeconds": 1200,
+              "onFailure": "Abort",
+              "inputs": {
+                "InstanceIds": [
+                  "{{launchInstance.InstanceIds}}"
+                ],
+                "DesiredState": "stopped"
+              }
+            },
+            {
+              "name": "createImage",
+              "action": "aws:createImage",
+              "maxAttempts": 3,
+              "onFailure": "Abort",
+              "inputs": {
+                "InstanceId": "{{launchInstance.InstanceIds}}",
+                "ImageName": "{{ TargetAmiName }}-{{AMIVersion}}-{{ global:DATE_TIME }}",
+                "NoReboot": true,
+                "ImageDescription": "AMI Generated by EC2 Automation on {{global:DATE_TIME}} from {{SourceAmiId}}"
+              }
+            },
+            {
+              "name": "startInstance",
+              "action": "aws:changeInstanceState",
+              "maxAttempts": 3,
+              "timeoutSeconds": 1200,
+              "onFailure": "Abort",
+              "inputs": {
+                "InstanceIds": [
+                  "{{launchInstance.InstanceIds}}"
+                ],
+                "DesiredState": "running"
+              }
+            },
+            {
+              "name": "findSnapshotForImage",
+              "action": "aws:runCommand",
+              "maxAttempts": 3,
+              "timeoutSeconds": 300,
+              "onFailure": "Abort",
+              "inputs": {
+                "DocumentName": "AWS-RunShellScript",
+                "InstanceIds": [
+                  "{{ launchInstance.InstanceIds }}"
+                ],
+                "Parameters": {
+                  "commands": [
+                    "#!/bin/bash \n",
+                    "snapId=( $(aws ec2 describe-images --image-ids {{ createImage.ImageId }} --region {{global:REGION}} --output text --query 'Images[*].BlockDeviceMappings[*].Ebs.SnapshotId') )",
+                    "echo -n $snapId"
+                  ]
+                }
+              }
+            },
+            {
+              "name":"deleteOnTagValue",
+              "action":"aws:runCommand",
+              "maxAttempts":3,
+              "timeoutSeconds":3600,
+              "onFailure": "Abort",
+              "inputs":{
+                "DocumentName":"AWS-RunShellScript",
+                "InstanceIds":[
+                  "{{launchInstance.InstanceIds}}"
+                ],
+                "Parameters":{
+                  "commands":[
+                    "#!/bin/bash \n",
+                    "deleteontag=$(date -d '+{{RetentionPeriod}} days' '+%Y-%m-%d')",
+                    "echo -n $deleteontag"
+                  ]}
+                }
+            },
+            {
+              "name": "tagSnapshot",
+              "action": "aws:createTags",
+              "maxAttempts": 3,
+              "onFailure": "Abort",
+              "inputs": {
+                "ResourceType": "EC2",
+                "ResourceIds": [
+                  "{{ findSnapshotForImage.Output }}"
+                ],
+                "Tags": [
+                  {
+                    "Key": "Application",
+                    "Value": ""
+                  },
+                  {
+                    "Key": "Compliance",
+                    "Value": ""
+                  },
+                  {
+                    "Key": "DeleteOn",
+                    "Value": "{{deleteOnTagValue.Output}}"
+                  },
+                  {
+                    "Key": "Environment",
+                    "Value": ""
+                  },
+                  {
+                    "Key": "InstanceName",
+                    "Value": ""
+                  },
+                  {
+                    "Key": "MountPoint",
+                    "Value": ""
+                  },
+                  {
+                    "Key": "encrypted",
+                    "Value": "{{Encryption}}"
+                  },
+                  {
+                    "Key": "Name",
+                    "Value": "AMI: {{ createImage.ImageId }}"
+                  },
+                  {
+                    "Key": "Owner",
+                    "Value": ""
+                  },
+                  {
+                    "Key": "Project",
+                    "Value": ""
+                  },
+                  {
+                    "Key": "VolumeName",
+                    "Value": ""
+                  }
+                ]
+              }
+            },
+            {
+              "name": "tagImage",
+              "action": "aws:createTags",
+              "maxAttempts": 3,
+              "onFailure": "Abort",
+              "inputs": {
+                "ResourceType": "EC2",
+                "ResourceIds": [
+                  "{{ createImage.ImageId }}"
+                ],
+                "Tags": [
+                  {
+                    "Key": "Original_AMI_ID",
+                    "Value": "Created from {{ SourceAmiId }}"
+                  },
+                  
+                  {
+                    "Key": "os",
+                    "Value": "{{OSName}}"
+                  },
+                  {
+                    "Key": "version",
+                    "Value": "{{AMIVersion}}"
+                  },
+                  {
+                    "Key": "osservicelevel",
+                    "Value": { "Fn::FindInMap" : [ "OSServiceLevelMap", { "Ref" : "pDXCServiceTier" }, "OSServiceLevel"]}
+                  },
+                  {
+                    "Key": "encrypted",
+                    "Value": "{{Encryption}}"
+                  },
+                  {
+                    "Key" : "Environment",
+                    "Value" : "{{Environment}}"
+                  },
+                  {
+                    "Key": "DeleteOn",
+                    "Value": "{{deleteOnTagValue.Output}}"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "terminateInstance",
+              "action": "aws:changeInstanceState",
+              "maxAttempts": 3,
+              "onFailure": "Continue",
+              "inputs": {
+                "InstanceIds": [
+                  "{{launchInstance.InstanceIds}}"
+                ],
+                "DesiredState": "terminated"
+              }
+            }
+          ],
+          "outputs": [
+            "createImage.ImageId"
+          ]
+        }
+      }
+    }
+  }
+}

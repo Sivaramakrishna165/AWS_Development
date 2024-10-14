@@ -1,0 +1,882 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Configure CloudWatch Logs and SNS Messages for Backup; Create Backup/Delete Snapshot Lambda; and Backup Schedule
+
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+  pSESLayerArn:
+    Type : 'AWS::SSM::Parameter::Value<String>'
+    Default: /DXC/SES/SESLayerLambdaArn
+      
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/EBSBackups/S3AssetBucket
+    Description: SSM Parameter for bucket location
+
+  pLinuxLevel2BackupDoc:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Backups/LinuxLevel2SnapshotDoc
+    Description: AWS Command Document for creating linux Snapshots
+
+  pAssetsPath:
+    Description: "SSM parameter for Assets Path"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Main/DXCCloudFormationAssetsPath
+
+  pBackupQueueName:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Backups/DXCBackupQueue
+    Description: "SQS queue name to have messages of instances"
+
+  pBackupHealthQueueName:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Backups/DXCBackupHealthQueue
+    Description: "SQS queue name to have messages of instances"
+
+  pDXCNotifyEmail:
+    Description: AWS SSM Parameter that contains the notification email address
+      for product operational issues for DXC support to investigate
+      (you will receive an email, reply to confirm the subscription)
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/Notification/DXCNotifyEmail"
+
+  pApplyBackup:
+    Description: "Create the resources only if Backup is enabled"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Backups/ApplyBackup
+  
+  pBackupHealthSchedule:
+    Description: "Schedule cron for Healthcheck of snapshot"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Backups/BackupHealthSchedule
+
+  pBackupCreateSchedule:
+    Description: "SSM Parameter containing cron string for Creating backups"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Backups/BackupCreateSchedule
+    
+  pBackupDeleteSchedule:
+    Description: "SSM Parameter containing cron string for deleting backups"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Backups/BackupDeleteSchedule
+    
+  pUpdateCustomStackLambdaARN:
+    Description: "SSM parameter for update stack lambda"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Lambda/UpdateCustomBackupScheduleLambdaARN
+
+  pBackupSNSTopic:
+    Description: Backup SNS Topic
+    Default: BackupSNSTopic
+    Type: String
+
+  pBackupLogGroup:
+    Description: Backup CloudWatch Log Group
+    Default: BackupLogGroup
+    Type: String
+
+  pBackupMessageStream:
+    Description: Backup CloudWatch Log Message Stream
+    Default: BackupMessageStream
+    Type: String
+    
+  pBackupSQSQueue:
+    Description: Queue used while processing the backups
+    Default: "DXC-AWSMS-Backup-DescribeInstancesQueue"
+    Type: String
+
+  pBackupsIncidentPriority:
+    Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor, 4-warning, 5-ok (can be updated if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3']
+
+Conditions:
+  cApplyBackup: !Equals ['true', !Ref pApplyBackup]
+
+Resources:
+    rResourceTypeSQSQueue:
+        Type: "AWS::SQS::Queue"
+        Condition: cApplyBackup
+        Properties: 
+            QueueName: !Ref pBackupQueueName
+            DelaySeconds: 0
+            VisibilityTimeout: 900
+            Tags:
+                - Key: "Owner"
+                  Value: "DXC"
+                - Key: "Application"
+                  Value: "AWS Managed Services"
+    
+    rResourceTypeBackupHealthSQSQueue:
+        Type: "AWS::SQS::Queue"
+        Condition: cApplyBackup
+        Properties: 
+            QueueName: !Ref pBackupHealthQueueName
+            DelaySeconds: 0
+            VisibilityTimeout: 900
+            Tags:
+                - Key: "Owner"
+                  Value: "DXC"
+                - Key: "Application"
+                  Value: "AWS Managed Services"
+
+    rBackupLogGroup:
+        Type: AWS::Logs::LogGroup
+        Condition: cApplyBackup
+        Properties:
+            RetentionInDays: 90
+            LogGroupName: !Ref pBackupLogGroup
+
+    rLogStream:
+        Type: "AWS::Logs::LogStream"
+        DependsOn: rBackupLogGroup
+        Properties:
+            LogGroupName: !Ref pBackupLogGroup
+            LogStreamName: !Ref pBackupMessageStream
+
+    rBackupAlarmTopic:
+        Type: AWS::SNS::Topic
+        Condition: cApplyBackup
+        Properties:
+            TopicName: !Ref pBackupSNSTopic
+            Subscription:
+              - Endpoint: !Ref pDXCNotifyEmail
+                Protocol: email
+
+    rBackupSnsSSMParam:
+        Type: "AWS::SSM::Parameter"
+        Properties:
+            Name: "/DXC/Backups/BackupsSNSTopic"
+            Description: "Backup SNS topic to Notify"
+            Type: "String"
+            Value: !Ref rBackupAlarmTopic
+
+    rIncidentPrioritySSMParam:
+        Type: "AWS::SSM::Parameter"
+        Properties:
+            Name: "/DXC/Backups/IncidentPriority"
+            Description: "Backup Incident Priority"
+            Type: "String"
+            Value: !Ref pBackupsIncidentPriority
+
+    rLambdaRoleBackupHandler:
+        Type:  AWS::IAM::Role
+        Condition: cApplyBackup
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: Allow
+                        Principal:
+                            Service:
+                                -   lambda.amazonaws.com
+                                -   ssm.amazonaws.com
+                        Action:
+                            -   sts:AssumeRole
+            ManagedPolicyArns:
+                -   arn:aws:iam::aws:policy/AWSLambdaExecute
+                
+            Policies:
+                -
+                    PolicyName: !Join ["-", ["BackupRole", !Ref "AWS::Region"]]
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -   Effect: Allow
+                                Action:
+                                    -   events:ListRules
+                                    -   ec2:DescribeInstances
+                                    -   ec2:DescribeVolumes
+                                    -   ec2:CreateSnapshot
+                                    -   ec2:DescribeSnapshots
+                                    -   ec2:DeleteSnapshot
+                                    -   ec2:DescribeTags
+                                    -   ec2:CreateTags
+                                    -   ec2:DeleteTags
+                                    -   ssm:SendCommand
+                                    -   iam:PassRole
+                                    -   lambda:InvokeFunction
+                                    -   sns:ListTopics
+                                Resource:
+                                    -   "*"
+                            -   Effect: "Allow"
+                                Action:
+                                     - "logs:CreateLogGroup"
+                                     - "logs:CreateLogStream"
+                                     - "logs:PutLogEvents"
+                                Resource: 
+                                     - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+                            -   Effect: Allow
+                                Action:
+                                    -   sqs:*
+                                Resource:
+                                   - !Sub 
+                                         - 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${QueueName}'
+                                         - { QueueName: !GetAtt rResourceTypeSQSQueue.QueueName }
+                            -   Effect: Allow
+                                Action:
+                                    - sns:Publish
+                                Resource: 
+                                    - !Join ["", ["arn:aws:sns:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":",!Ref pBackupSNSTopic]]
+        
+
+    rLambdaFunctionBackupHandler:
+        Type: AWS::Lambda::Function
+        DependsOn:
+            - rLambdaRoleBackupHandler
+        Properties:
+            Description: "Processes events from CloudWatch to create and purge Instance backups"
+            Environment:
+                Variables:
+                  QueueUrl: !Ref rResourceTypeSQSQueue
+                  LinuxLevel2BackupDoc : !Ref pLinuxLevel2BackupDoc
+                  LambdaRoleBackupHandlerArn : !GetAtt rLambdaRoleBackupHandler.Arn
+                  MaxNumberOfInstances : 10
+                  LambdaWaitTime : 3
+                  BackupSNSTopic: !Ref rBackupAlarmTopic
+                  BackupSQSQueue: !Ref pBackupSQSQueue
+            Handler: "backupHandler.handler"
+            Role:
+                !GetAtt rLambdaRoleBackupHandler.Arn
+            Code:
+                S3Bucket: !Ref pDXCS3BucketName
+                S3Key:  !Sub "${pDXCS3KeyPrefix}/ebs_backups.zip"
+            Runtime: nodejs18.x
+            Layers:
+              - !Ref pSESLayerArn
+            Timeout: 300
+            # Memory Size set to 1G for AWSPE-3655
+            MemorySize: 1024
+            Tags:
+              - Key: Owner
+                Value: DXC
+              - Key: Purpose
+                Value: "Backup Handler"
+
+    rSaveBackupHandlerArn:
+        Type: AWS::SSM::Parameter
+        Condition: cApplyBackup
+        DependsOn:
+            - rLambdaFunctionBackupHandler
+        Properties:
+            Name: "/DXC/Backups/BackupHandler"
+            Type: String
+            Value:
+                !GetAtt rLambdaFunctionBackupHandler.Arn
+            Description: "ARN for BackupHandler lambda function"
+
+    rPermissionForBackupService:
+        Type: AWS::Lambda::Permission
+        Condition: cApplyBackup
+        Properties:
+            FunctionName:
+                !Ref rLambdaFunctionBackupHandler
+            Action: lambda:InvokeFunction
+            Principal: events.amazonaws.com
+    rLambdaRoleBackupProcessor:
+        Type:  AWS::IAM::Role
+        Condition: cApplyBackup
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: Allow
+                        Principal:
+                            Service:
+                                -   lambda.amazonaws.com
+                               
+                        Action:
+                            -   sts:AssumeRole
+            ManagedPolicyArns:
+                -   arn:aws:iam::aws:policy/AWSLambdaExecute
+                
+            Policies:
+                -
+                    PolicyName: !Join ["-", ["BackupProcessorRole", !Ref "AWS::Region"]]
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -   Effect: Allow
+                                Action:
+                                    -   lambda:InvokeFunction
+                                Resource:
+                                    - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:levelOneBackupLambda'
+                                    - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:levelTwoWindowsBackupLambda'                   
+                                    - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:levelTwoLinuxBackupLambda'
+                            -   Effect: "Allow"
+                                Action:
+                                     - "logs:CreateLogGroup"
+                                     - "logs:CreateLogStream"
+                                     - "logs:PutLogEvents"
+                                Resource: 
+                                     - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+                            -   Effect: Allow
+                                Action:
+                                    - sns:Publish
+                                Resource: 
+                                    - !Join ["", ["arn:aws:sns:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":",!Ref pBackupSNSTopic]]                            
+                            -   Effect: Allow
+                                Action:
+                                    -   sqs:ReceiveMessage
+                                    -   sqs:DeleteMessage
+                                    -   sqs:GetQueueAttributes
+                                Resource:
+                                   - !Sub 
+                                         - 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${QueueName}'
+                                         - { QueueName: !GetAtt rResourceTypeSQSQueue.QueueName }
+                            -   Effect: Allow
+                                Action:
+                                    -   ec2:CreateTags
+                                Resource:
+                                    -   !Join ["", ["arn:aws:ec2:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":instance/*"]]
+                                    -   !Join ["", ["arn:aws:ec2:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":snapshot/*"]]
+                                    -   !Join ["", ["arn:aws:ec2:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":volume/*"]]
+
+
+    rLambdaFunctionBackupProcessor:
+        Type: AWS::Lambda::Function
+        DependsOn:
+            - rLambdaRoleBackupProcessor
+        Properties:
+            Description: "Processes the backup sqs messages"
+            Environment:
+                Variables:
+                  LinuxLevel2BackupDoc : !Ref pLinuxLevel2BackupDoc
+                  BackupSNSTopic: !Ref rBackupAlarmTopic
+
+                
+            Handler: "backupItemProcessor.handler"
+            Role:
+                !GetAtt rLambdaRoleBackupProcessor.Arn
+            Code:
+                S3Bucket: !Ref pDXCS3BucketName
+                S3Key:  !Sub "${pDXCS3KeyPrefix}/backup_processor.zip"
+            Runtime: nodejs18.x
+            Layers:
+              - !Ref pSESLayerArn
+            Timeout: 300
+            # Memory Size set to 1G for AWSPE-3655
+            MemorySize: 1024
+            Tags:
+              - Key: Owner
+                Value: DXC
+              - Key: Purpose
+                Value: "Backup Item Processor"
+    
+    rBackupProcessorEventSourceMapping:
+        Type: AWS::Lambda::EventSourceMapping
+        Properties:
+            BatchSize: 10
+            Enabled: true
+            EventSourceArn: !GetAtt rResourceTypeSQSQueue.Arn
+            FunctionName: !GetAtt   rLambdaFunctionBackupProcessor.Arn
+    
+    rBackupHealthProcessorEventSourceMapping:
+        Type: AWS::Lambda::EventSourceMapping
+        Properties:
+            BatchSize: 10
+            Enabled: true
+            EventSourceArn: !GetAtt rResourceTypeBackupHealthSQSQueue.Arn
+            FunctionName: !GetAtt   rLambdaFunctionBackupHealthCheck.Arn
+
+    rLambdaRoleLevelOneBackup:
+        Type:  AWS::IAM::Role
+        Condition: cApplyBackup
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: Allow
+                        Principal:
+                            Service:
+                                -   lambda.amazonaws.com
+                                -   ssm.amazonaws.com
+                        Action:
+                            -   sts:AssumeRole
+
+            ManagedPolicyArns:
+                -   arn:aws:iam::aws:policy/AWSLambdaExecute
+                
+            Policies:
+                -
+                    PolicyName: !Join ["-", ["LevelOneBackupPolicy", !Ref "AWS::Region"]]
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -   Effect: Allow
+                                Action:
+                                    -   ec2:CreateSnapshot
+                                    -   ec2:DescribeSnapshots
+                                    -   ec2:DeleteTags
+                                    -   ec2:CreateTags
+                                Resource:
+                                    - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                                    - !Sub 'arn:aws:ec2:${AWS::Region}::snapshot/*'
+                                    - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*'
+                            -   Effect: "Allow"
+                                Action:
+                                     - "logs:CreateLogGroup"
+                                     - "logs:CreateLogStream"
+                                     - "logs:PutLogEvents"
+                                Resource: 
+                                     - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+                            -   Effect: Allow
+                                Action:
+                                    -   sqs:ReceiveMessage
+                                    -   sqs:DeleteMessage
+                                    -   sqs:GetQueueAttributes
+                                Resource:
+                                   - !Sub 
+                                         - 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${QueueName}'
+                                         - { QueueName: !GetAtt rResourceTypeSQSQueue.QueueName }
+                            -   Effect: Allow
+                                Action:
+                                    - sns:Publish
+                                Resource: 
+                                    - !Join ["", ["arn:aws:sns:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":",!Ref pBackupSNSTopic]]
+                       
+
+    rLambdaFunctionLevelOneBackup:
+        Type: AWS::Lambda::Function
+        DependsOn:
+            - rLambdaFunctionBackupProcessor
+        Properties:
+            Description: "Processes events from CloudWatch to create and purge Instance backups"
+            FunctionName: "levelOneBackupLambda"
+            Environment:
+                Variables:
+                  BackupSQSQueue: !Ref pBackupSQSQueue
+                  QueueUrl: !Ref rResourceTypeSQSQueue
+                  BackupSNSTopic: !Ref rBackupAlarmTopic
+
+
+            Handler: "levelOneBackupLambda.handler"
+            Role:
+                !GetAtt rLambdaRoleLevelOneBackup.Arn
+            Code:
+                S3Bucket: !Ref pDXCS3BucketName
+                S3Key:  !Sub "${pDXCS3KeyPrefix}/levelonebackup.zip"
+            Runtime: nodejs18.x
+            Layers:
+              - !Ref pSESLayerArn
+            Timeout: 300
+            # Memory Size set to 1G for AWSPE-3655
+            MemorySize: 1024
+            Tags:
+              - Key: Owner
+                Value: DXC
+              - Key: Purpose
+                Value: "Level One Backup Handler"
+    rLambdaRoleLevelTwoLinuxBackup:
+        Type:  AWS::IAM::Role
+        Condition: cApplyBackup
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: Allow
+                        Principal:
+                            Service:
+                                -   lambda.amazonaws.com
+                                -   ssm.amazonaws.com
+                        Action:
+                            -   sts:AssumeRole
+            ManagedPolicyArns:
+                -   arn:aws:iam::aws:policy/AWSLambdaExecute
+                
+            Policies:
+                -
+                    PolicyName: !Join ["-", ["LevelTwoBackupPolicy", !Ref "AWS::Region"]]
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -   Effect: Allow
+                                Action:
+                                    -   ssm:SendCommand
+                                    -   iam:PassRole
+                                    -   ec2:DeleteTags
+                                   
+                                Resource:
+                                    -  !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                                    -  !Sub
+                                        - 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/${BackupDocument}'
+                                        - {BackupDocument: !Ref pLinuxLevel2BackupDoc }
+                                    -  !Sub 'arn:aws:iam::${AWS::AccountId}:role/*'
+                
+                            -   Effect: "Allow"
+                                Action:
+                                     - "logs:CreateLogGroup"
+                                     - "logs:CreateLogStream"
+                                     - "logs:PutLogEvents"
+                                Resource: 
+                                     - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+                            -   Effect: Allow
+                                Action:
+                                    -   sqs:ReceiveMessage
+                                    -   sqs:DeleteMessage
+                                    -   sqs:GetQueueAttributes
+                                Resource:
+                                   - !Sub 
+                                         - 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${QueueName}'
+                                         - { QueueName: !GetAtt rResourceTypeSQSQueue.QueueName }
+                            -   Effect: Allow
+                                Action:
+                                    - sns:Publish
+                                Resource: 
+                                    - !Join ["", ["arn:aws:sns:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":",!Ref pBackupSNSTopic]]
+          
+
+    rLambdaFunctionLevelTwoLinuxBackup:
+        Type: AWS::Lambda::Function
+        DependsOn:
+            - rLambdaFunctionBackupProcessor
+        Properties:
+            Description: "Processes events from CloudWatch to create and purge Instance backups"
+            FunctionName: "levelTwoLinuxBackupLambda"
+            Environment:
+                Variables:
+                  LinuxLevel2BackupDoc : !Ref pLinuxLevel2BackupDoc
+                  QueueUrl: !Ref rResourceTypeSQSQueue
+                  BackupSNSTopic: !Ref rBackupAlarmTopic
+                  LambdaRoleBackupHandlerArn: !GetAtt rLambdaRoleLevelTwoLinuxBackup.Arn
+
+
+            Handler: "levelTwoLinuxBackupLambda.handler"
+            Role:
+                !GetAtt rLambdaRoleLevelTwoLinuxBackup.Arn
+            Code:
+                S3Bucket: !Ref pDXCS3BucketName
+                S3Key:  !Sub "${pDXCS3KeyPrefix}/leveltwolinuxbackup.zip"
+            Runtime: nodejs18.x
+            Layers:
+              - !Ref pSESLayerArn
+            Timeout: 300
+            # Memory Size set to 1G for AWSPE-3655
+            MemorySize: 1024
+            Tags:
+              - Key: Owner
+                Value: DXC
+              - Key: Purpose
+                Value: "Backup Handler"
+
+    rLambdaRoleLevelTwoWindowsBackup:
+        Type:  AWS::IAM::Role
+        Condition: cApplyBackup
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    -   Effect: Allow
+                        Principal:
+                            Service:
+                                -   lambda.amazonaws.com
+                                -   ssm.amazonaws.com
+                        Action:
+                            -   sts:AssumeRole
+            ManagedPolicyArns:
+                -   arn:aws:iam::aws:policy/AWSLambdaExecute
+                
+            Policies:
+                -
+                    PolicyName: !Join ["-", ["LevelTwoWindowsBackupPolicy", !Ref "AWS::Region"]]
+                    PolicyDocument:
+                        Version: "2012-10-17"
+                        Statement:
+                            -   Effect: Allow
+                                Action:
+                                    -   ssm:SendCommand
+                                    -   iam:PassRole
+                                    -   ec2:DeleteTags
+                                Resource:
+                                   -  !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                                   -  !Sub 'arn:aws:ssm:${AWS::Region}::document/AWSEC2-CreateVssSnapshot'
+                                   -  !Sub 'arn:aws:iam::${AWS::AccountId}:role/*'
+                            -   Effect: "Allow"
+                                Action:
+                                     - "logs:CreateLogGroup"
+                                     - "logs:CreateLogStream"
+                                     - "logs:PutLogEvents"
+                                Resource: 
+                                     - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+                            -   Effect: Allow
+                                Action:
+                                    -   sqs:ReceiveMessage
+                                    -   sqs:DeleteMessage
+                                    -   sqs:GetQueueAttributes
+                                Resource:
+                                   - !Sub 
+                                         - 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${QueueName}'
+                                         - { QueueName: !GetAtt rResourceTypeSQSQueue.QueueName }
+                            -   Effect: Allow
+                                Action:
+                                    - sns:Publish
+                                Resource: 
+                                    - !Join ["", ["arn:aws:sns:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":",!Ref pBackupSNSTopic]]
+                          
+
+    rLambdaFunctionLevelTwoWindowsBackup:
+        Type: AWS::Lambda::Function
+        
+        DependsOn:
+            - rLambdaFunctionBackupProcessor
+        Properties:
+            Description: "Processes events from CloudWatch to create and purge Instance backups"
+            FunctionName: "levelTwoWindowsBackupLambda"
+            Environment:
+                Variables:
+                 QueueUrl: !Ref rResourceTypeSQSQueue
+                 BackupSNSTopic: !Ref rBackupAlarmTopic
+                 LambdaRoleBackupHandlerArn: !GetAtt rLambdaRoleLevelTwoWindowsBackup.Arn
+
+
+            Handler: "levelTwoWindowsBackupLambda.handler"
+            Role:
+                !GetAtt rLambdaRoleBackupHandler.Arn
+            Code:
+                S3Bucket: !Ref pDXCS3BucketName
+                S3Key:  !Sub "${pDXCS3KeyPrefix}/leveltwowindowsbackup.zip"
+            Runtime: nodejs18.x
+            Layers:
+              - !Ref pSESLayerArn
+            Timeout: 300
+            # Memory Size set to 1G for AWSPE-3655
+            MemorySize: 1024
+            Tags:
+              - Key: Owner
+                Value: DXC
+              - Key: Purpose
+                Value: "Backup Handler"
+
+    rSnapshotCreateRule:
+        Type: AWS::Events::Rule
+        Condition: cApplyBackup
+        Properties:
+            Description: "Scheduled Rule to create Snapshots"
+            ScheduleExpression: !Ref pBackupCreateSchedule
+            State: ENABLED
+            Targets:
+                -
+                    Arn: !GetAtt rLambdaFunctionBackupHandler.Arn
+                    Id: "Create"
+                    Input: "{\"resources\": [\"Create\"]}"
+
+    rSnapshotDeleteRule:
+        Type: AWS::Events::Rule
+        Condition: cApplyBackup
+        Properties:
+            Description: "Scheduled Rule to delete Snapshots"
+            ScheduleExpression: !Ref pBackupDeleteSchedule
+            State: ENABLED
+            Targets:
+                -
+                    Arn: !GetAtt rLambdaFunctionBackupHandler.Arn
+                    Id: "Delete"
+
+#Backup Health:
+
+    rLambdaRoleBackupHealth:
+      Condition: cApplyBackup
+      Type:  AWS::IAM::Role
+      Properties:
+          AssumeRolePolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                  -   Effect: Allow
+                      Principal:
+                          Service:
+                              -   lambda.amazonaws.com
+                      Action:
+                          -   sts:AssumeRole
+          ManagedPolicyArns:
+              -   arn:aws:iam::aws:policy/AWSLambdaExecute
+
+          Policies:
+              -
+                  PolicyName: !Join ["-", ["BackupRole", !Ref "AWS::Region"]]
+                  PolicyDocument:
+                      Version: "2012-10-17"
+                      Statement:
+                          -   Effect: Allow
+                              Action:
+                                  -   events:ListRules
+                                  -   ec2:DescribeInstances
+                                  -   ec2:DescribeVolumes
+                                  -   ec2:DescribeSnapshots
+                                  -   sns:ListTopics
+                                  
+                              Resource:
+                                  -   "*"
+                          - Effect: Allow
+                            Action:
+                              - logs:CreateLogGroup
+                              - logs:CreateLogStream
+                              - logs:PutLogEvents
+                            Resource: 
+                              - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+                          -   Effect: Allow
+                              Action:
+                                  -   logs:PutLogEvents
+                                  -   logs:DescribeLogStreams
+                              Resource:
+                                  - !Join ["", ["arn:aws:logs:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":log-group:",!Ref pBackupLogGroup,":log-stream:*"]]
+                          -   Effect: Allow
+                              Action:
+                                  - sns:Publish
+                              Resource: 
+                                  - !Join ["", ["arn:aws:sns:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":",!Ref pBackupSNSTopic]]
+                          -   Effect: Allow
+                              Action:
+                                  - ssm:GetParameter
+                              Resource: 
+                                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/DXC/Backups/IncidentPriority"
+                          -   Effect: Allow
+                              Action:
+                                  -   sqs:*
+                              Resource:
+                                 - !Sub 
+                                   - 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${QueueName}'
+                                   - { QueueName: !GetAtt rResourceTypeBackupHealthSQSQueue.QueueName }
+    rLambdaFunctionBackupHealth:
+        Type: AWS::Lambda::Function
+        DependsOn:
+            -   rLambdaRoleBackupHealth
+        Properties:
+            Description: "Verifies that backs are current - Processor"
+            Handler: "backup_health_processor.handler"
+            Role:
+                !GetAtt rLambdaRoleBackupHealth.Arn
+            Code:
+                S3Bucket: !Ref pDXCS3BucketName
+                S3Key: !Sub "${pDXCS3KeyPrefix}/backup_health_processor.zip"
+            Environment: 
+                Variables: 
+                    QueueUrl: !Ref rResourceTypeBackupHealthSQSQueue
+                    BackupLogGroup: !Ref pBackupLogGroup
+                    BackupMessageStream: !Ref pBackupMessageStream
+                    BackupSNSTopic: !Ref pBackupSNSTopic  
+                    IncidentPrioritySSMParam: !Ref rIncidentPrioritySSMParam
+            Runtime: python3.11
+            Layers:
+              - !Ref pSESLayerArn
+            Timeout: 900
+            Tags:
+              - Key: Owner
+                Value: DXC
+    
+    rLambdaFunctionBackupHealthCheck:
+        Type: AWS::Lambda::Function
+        DependsOn:
+            -   rLambdaRoleBackupHealth
+        Properties:
+            Description: "Verifies that backs are current - Check"
+            Handler: "backup_health_checks.handler"
+            Role:
+                !GetAtt rLambdaRoleBackupHealth.Arn
+            Code:
+                S3Bucket: !Ref pDXCS3BucketName
+                S3Key: !Sub "${pDXCS3KeyPrefix}/backup_health_checks.zip"
+            Environment: 
+                Variables: 
+                    QueueUrl: !Ref rResourceTypeBackupHealthSQSQueue
+                    BackupLogGroup: !Ref pBackupLogGroup
+                    BackupMessageStream: !Ref pBackupMessageStream
+                    BackupSNSTopic: !Ref pBackupSNSTopic  
+                    IncidentPrioritySSMParam: !Ref rIncidentPrioritySSMParam
+            Runtime: python3.11
+            Layers:
+              - !Ref pSESLayerArn
+            Timeout: 300
+            Tags:
+              - Key: Owner
+                Value: DXC
+
+    rPermissionForBackupHealthService:
+        Type: AWS::Lambda::Permission
+        Condition: cApplyBackup
+        Properties:
+            FunctionName:
+                !Ref rLambdaFunctionBackupHealth
+            Action: lambda:InvokeFunction
+            Principal: events.amazonaws.com
+
+    rBackupHealthSchedule:
+        Type: AWS::Events::Rule
+        Condition: cApplyBackup
+        Properties:
+            Description: "Scheduled Rule to verify Snapshots"
+            ScheduleExpression: !Ref pBackupHealthSchedule
+            State: ENABLED
+            Targets:
+                -
+                    Arn: !GetAtt rLambdaFunctionBackupHealth.Arn
+                    Id: "Verify"
+
+# Helper function to generate cron schedule:
+    rLambdaRoleCron:
+      Condition: cApplyBackup
+      Type:  AWS::IAM::Role
+      Properties:
+          AssumeRolePolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                  -   Effect: Allow
+                      Principal:
+                          Service:
+                              -   lambda.amazonaws.com
+                      Action:
+                          -   sts:AssumeRole
+          ManagedPolicyArns:
+              -   arn:aws:iam::aws:policy/AWSLambdaExecute
+
+    rLambdaFunctionCron:
+        Type: AWS::Lambda::Function
+        DependsOn:
+            -   rLambdaRoleCron
+        Properties:
+            FunctionName: "createCron"
+            Description: "Creates a cron expression"
+            Handler: "createCron.handler"
+            Role:
+                !GetAtt rLambdaRoleCron.Arn
+            Code:
+                S3Bucket: !Ref pDXCS3BucketName
+                S3Key: !Sub "${pDXCS3KeyPrefix}/ebs_backups.zip"
+            Runtime: nodejs18.x
+            Layers:
+              - !Ref pSESLayerArn
+            Timeout: 180
+            Tags:
+              - Key: Owner
+                Value: DXC
+
+    # Update existing CustomBackupSchedules
+    rUpdateCustomBackupSchedule:
+        Condition: cApplyBackup
+        Type: Custom::UpdateCustomBackupSchedule
+        DependsOn: rSaveBackupHandlerArn
+        Properties:
+            Description: "Update CustomBackupSchedule stacks with BackupHandler ARN"
+            ServiceToken: !Ref pUpdateCustomStackLambdaARN
+            AssetsPath: !Ref pAssetsPath
+Outputs:
+
+    BackupLambdaARN:
+        Value:
+            !GetAtt rLambdaFunctionBackupHandler.Arn
+        Export:
+            Name: "BackupLambdaARN"
+
+    BackupHealthLambdaARN:
+        Value:
+            !GetAtt rLambdaFunctionBackupHealth.Arn
+        Export:
+            Name: "BackupHealthLambdaARN"

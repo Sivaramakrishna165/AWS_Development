@@ -1,0 +1,99 @@
+---
+# Feature Definition (FD) for EksEc2BasedNodegroup
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: EksEc2BasedNodegroup 
+Version: '9.0.0.2'
+StandardCreationBatch: 4
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creation of EKS Cluster along with nodegroup, launch template
+
+EKSEc2BasedNodegroupParameters:
+
+  ClusterName:
+    Description: Name of the EKS cluster
+    Type: String
+    Default: ''
+
+  KeyName:
+    Type: String
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Default: "<key-pair>"
+
+  NodeAutoScalingGroupDesiredCapacity:
+    Type: Number
+    Default: 2
+    Description: Desired capacity of Node Group ASG.
+
+  NodeAutoScalingGroupMaxSize:
+    Type: Number
+    Default: 5
+    Description: Maximum size of Node Group ASG. Set to at least 1 greater than NodeAutoScalingGroupDesiredCapacity.
+
+  NodeAutoScalingGroupMinSize:
+    Type: Number
+    Default: 2
+    Description: Minimum size of Node Group ASG.
+
+  NodeImageId:
+    Type: String
+    Description: Specify your custom image ID. This must be a Hardened AMI.
+    Default: "<hardened ami-id>"
+
+  DisableIMDSv1:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "false"
+      - "true"
+
+  NodeInstanceType:
+    Type: String
+    Default: t3.large
+    ConstraintDescription: Must be a valid EC2 instance type
+    Description: EC2 instance type for the node instances. Provide instance type that supports uefi boot mode. eg t3.medium, r5.xlarge, c7gn.large, m6idn.4xlarge etc
+
+  NodeVolumeSize:
+    Type: Number
+    Default: 50
+    Description: Node volume size
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC of the worker instances
+    Default: "<vpc-12345>"
+
+  Subnets:
+    Type: String
+    Default: "dummy"
+    Description: The subnets where workers can be created. Leave Default as 'dummy' if you want to pull the private subnets
+                  automatically. Otherwise, give the subnets as comma separated values ex- 'subnet-abcd1,subnetabcd2'
+  ClusterControlPlaneSecurityGroup:
+    Type: String
+    Default: ""
+    Description: Cluster security group id.
+
+  BootstrapArguments:
+    Type: String
+    Default: ""
+    Description: "Arguments to pass to the bootstrap script. See files/bootstrap.sh in https://github.com/awslabs/amazon-eks-ami"
+
+  ClusterBackupBucket:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /DXC/EKSCluster-Backup/Bucket
+    Description: SSM Parameter that stores EKS Cluster backup bucket name.
+
+AllowDisable: true
+ResourceDeployment:
+  - EksEc2BasedNodegroup.yaml
+DepensOnFeature:
+  - CommonServicenow  
+

@@ -1,0 +1,744 @@
+{
+  "Comment": "A State Machine to execute backup and validate the Backup Availability for EC2 Backup Failure Selfheal usecase.",
+  "StartAt": "ListExcessiveSnapshotIds",
+  "States": {
+    "ListExcessiveSnapshotIds": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${ListExcessiveSnapshotIds}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "ListExcessiveSnapshotIdsError"
+        }
+      ],
+      "Next": "ChooseBackupLevel"
+    },
+    "ListExcessiveSnapshotIdsError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "ListExcessiveSnapshotIds Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "ChooseBackupLevel": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${ChooseBackupLevel}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "ChooseBackupLevelError"
+        }
+      ],
+      "Next": "TriggerBackup"
+    },
+    "ChooseBackupLevelError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "ChooseBackupLevel Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "TriggerBackup": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.Instance_SSM_Status",
+              "StringEquals": "Present"
+            },
+            {
+              "Variable": "$.backup_level_assigned",
+              "StringEquals": "2"
+            }
+          ],
+          "Next": "TriggerLevel2Backup"
+        }
+      ],
+      "Default": "TriggerLevel1Backup"
+    },
+    "TriggerLevel1Backup": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${TriggerLevel1Backup}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "TriggerLevel1BackupError"
+        }
+      ],
+      "Next": "WaitState"
+    },
+    "TriggerLevel1BackupError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "TriggerLevel1Backup Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "TriggerLevel2Backup": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${TriggerLevel2Backup}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "TriggerLevel2BackupError"
+        }
+      ],
+      "Next": "WaitForSsmCommand"
+    },
+    "TriggerLevel2BackupError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "TriggerLevel2Backup Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "WaitForSsmCommand": {
+      "Type": "Wait",
+      "Seconds": 180,
+      "Next": "CheckSSMCommandStatus"
+    },
+    "CheckSSMCommandStatus": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${CheckSSMCommandStatus}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "CheckSSMCommandStatusError"
+        }
+      ],
+      "Next": "CheckCmdStatus"
+    },
+    "CheckSSMCommandStatusError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "CheckSSMCommandStatus Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "CheckCmdStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.run_command_status",
+          "StringEquals": "success",
+          "Next": "FetchSnapshotIds"
+        },
+        {
+          "Variable": "$.run_command_status",
+          "StringEquals": "failed",
+          "Next": "TriggerLevel1Backup"
+        }
+      ]
+    },
+    "FetchSnapshotIds": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${FetchSnapshotIds}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "FetchSnapshotIdsError"
+        }
+      ],
+      "Next": "WaitState"
+    },
+    "FetchSnapshotIdsError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "FetchSnapshotIds Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "WaitState": {
+      "Type": "Wait",
+      "Seconds": 60,
+      "Next": "CheckSnapshotBackupStatus"
+    },
+    "CheckSnapshotBackupStatus": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${CheckSnapshotBackupStatus}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "CheckSnapshotBackupStatusError"
+        }
+      ],
+      "Next": "CheckStatus"
+    },
+    "CheckSnapshotBackupStatusError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "CheckSnapshotBackupStatus Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "CheckStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.status",
+          "StringEquals": "completed",
+          "Next": "DynamodbLogging"
+        },
+        {
+          "Variable": "$.status",
+          "StringEquals": "pending",
+          "Next": "CheckCount"
+        }
+      ]
+    },
+    "CheckCount": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.count",
+          "NumericEquals": 0,
+          "Next": "DynamodbLogging"
+        },
+        {
+          "Variable": "$.count",
+          "NumericGreaterThan": 0,
+          "Next": "WaitTimeForBackup"
+        }
+      ]
+    },
+    "WaitTimeForBackup": {
+      "Type": "Wait",
+      "Seconds": 900,
+      "Next": "CheckSnapshotBackupStatus"
+    },
+    "DynamodbLogging": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${DynamodbLogging}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "DynamodbLoggingError"
+        }
+      ],
+      "Next": "DeleteExcessSnapshotIds"
+    },
+    "DynamodbLoggingError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "DynamodbLogging Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "DeleteExcessSnapshotIds": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${DeleteExcessSnapshotIds}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "DeleteExcessSnapshotIdsError"
+        }
+      ],
+      "Next": "SendEmail"
+    },
+    "DeleteExcessSnapshotIdsError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "DeleteExcessSnapshotIds Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "SendEmail": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${SendEmail}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "SendEmailError"
+        }
+      ],
+      "Next": "SnowDescriptionInput"
+    },
+    "SendEmailError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "SendEmail Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "SnowDescriptionInput": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${SnowDescriptionInput}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "SnowDescriptionInputError"
+        }
+      ],
+      "Next": "ParallelState"
+    },
+    "SnowDescriptionInputError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "SnowDescriptionInput Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "ParallelState": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "SnowInput",
+          "States": {
+            "SnowInput": {
+              "Type": "Pass",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "StateMachineInfo",
+          "States": {
+            "StateMachineInfo": {
+              "Type": "Pass",
+              "Parameters": {
+                "Execution.$": "$$.Execution.Id",
+                "StateMachine.$": "$$.StateMachine.Name"
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "TriggerNotificationSFN"
+    },
+    "TriggerNotificationSFN": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${TriggerNotificationSFN}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "TriggerNotificationSFNError"
+        }
+      ],
+      "End": true
+    },
+    "TriggerNotificationSFNError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "TriggerNotificationSFN Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "TriggerNotificationSfnWError": {
+      "Comment":"This step will trigger notification sfn if states caught an error",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${TriggerNotificationSfnWError}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "TriggerNotificationSfnWErrorError"
+        }
+      ],
+      "Next": "NotifyForLambdaFunctionFailure"
+    },
+    "TriggerNotificationSfnWErrorError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "TriggerNotificationSfnWError Function"
+      },
+      "Next": "NotifyForLambdaFunctionFailure"
+    },
+    "NotifyForLambdaFunctionFailure": {
+      "Type": "Task",
+      "Resource": "${NotifyForLambdaFunctionFailure}",
+      "TimeoutSeconds": 900,
+      "End": true
+    }
+  }
+}

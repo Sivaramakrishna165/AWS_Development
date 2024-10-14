@@ -1,0 +1,25 @@
+---
+# Feature Definition (FD) for the Make Manage
+# Partition Key = Feature
+# No sort key needed
+
+Feature: MakeManage
+Version: '10.0.0.5'
+StandardCreationBatch: 3
+EnableFeature: true
+FeatureParams:
+  pMakeManageEnableScheduleJob:
+    Description: "Enable to run the Make Manage CloudWatch rule"
+    Type: String
+    AllowedValues: ["ENABLED", "DISABLED"]
+    Default: "ENABLED"
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creates required resources for make manage functionality to execute
+AllowDisable: true
+ResourceDeployment:
+  - make_manage.yaml

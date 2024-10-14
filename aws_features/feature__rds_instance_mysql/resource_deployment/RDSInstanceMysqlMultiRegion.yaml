@@ -1,0 +1,324 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  pPrimaryRegion:
+    Description: 'Primary Region of the RDS instance'
+    Type: String
+    Default: ''
+  pcommonserviceNowTopic:
+    Description: 'feature Common servicenow topic'
+    Type: String
+    Default: ''
+  pFeatureName:
+    Description: 'feature Name'
+    Type: String
+    Default: ''
+  pDXCS3BucketName:
+    Description: 'DXC Standard s3 bucket'
+    Type: String
+    Default: ''
+  
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "S3 path to the Lambda_functions"
+  
+  pDBIdentifier:
+    Type: String
+    Default : ""
+    Description: 'DB Identifier of the primary region.'
+
+  pSecondaryresources:
+    Type: String
+    Default: ""
+    Description: SSM parameter which stores secondary region resources 
+  
+
+
+Resources:
+  rDxcmsCreateIncidentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Join ["-", ["Dxcms-create-incident-lambda","-", !Select [5, !Split ["-", !Ref "AWS::StackName"]],"-","role", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+              
+              - Effect: Allow
+                Action:
+                  - "sns:Publish"
+                  - "dynamodb:GetItem"
+                Resource:
+                  - !Ref pcommonserviceNowTopic
+                  - !Sub "arn:aws:sns:${pPrimaryRegion}:${AWS::AccountId}:DXCMS-CW-Alarms-Create-Incidents"
+                  - !Sub "arn:aws:sns:${pPrimaryRegion}:${AWS::AccountId}:DXCMS-CW-Alarms-Create-Incidents-P1"
+                  - !Sub "arn:aws:sns:${pPrimaryRegion}:${AWS::AccountId}:DXCMS-CW-Alarms-Create-Incidents-P2"
+                  - !Sub "arn:aws:sns:${pPrimaryRegion}:${AWS::AccountId}:DXCMS-CW-Alarms-Create-Incidents-P3"
+                  - !Sub "arn:aws:dynamodb:${pPrimaryRegion}:${AWS::AccountId}:table/AccountFeatureDefinitions"
+
+  rDxcmsCreateIncidentLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join
+                    - '-'
+                    - - "Dxcms-CreateIncident"
+                      - !Select [5, !Split ["-", !Ref "AWS::StackName"]]
+
+      Environment:
+        Variables:
+          FEATURE_NAME: !Ref pFeatureName
+          PRIMARY_REGION: !Ref pPrimaryRegion
+          SERVICENOW_TOPIC: !Ref pcommonserviceNowTopic
+
+      Description: 'Receives data from RDS multi region Lambda, incident sns topic and sends to ServiceNow feature-CommonServicenow'
+      Runtime: python3.11
+      Handler: dxcms_create_incident.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt rDxcmsCreateIncidentRole.Arn
+      Timeout: 450 
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/dxcms_create_incident.zip"
+      
+
+
+  rDxcmsIncidentTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+          - Endpoint: !GetAtt rDxcmsCreateIncidentLambda.Arn
+            Protocol: lambda
+            
+      
+
+  rDxcmsRDSMultiRegionDRFailoverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Join ["-", ["Dxcms-RDS-Multi-Region-DR-Failover",!Select [5, !Split ["-", !Ref "AWS::StackName"]],"role", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+              
+              - Effect: Allow
+                Action:
+        
+                  - "dynamodb:GetItem"
+                  
+                  - "lambda:InvokeFunction"
+                  
+                Resource:
+                  
+                  - !Sub "arn:aws:dynamodb:${pPrimaryRegion}:${AWS::AccountId}:table/AccountFeatureDefinitions"
+                  
+                  - !GetAtt rDxcmsCreateIncidentLambda.Arn
+
+              - Effect: Allow
+                Action:
+                  - "ssm:PutParameter"
+                  - "ssm:GetParameter"
+                  - "ec2:DeleteSecurityGroup"
+                  - "rds:DeleteDBSubnetGroup"
+                  - "rds:CreateEventSubscription"
+                  - "ec2:AuthorizeSecurityGroupIngress"
+                  - "rds:DescribeDBInstanceAutomatedBackups"
+                  - "rds:DescribeEventSubscriptions"
+                  - "rds:StartDBInstanceAutomatedBackupsReplication"
+                  - "cloudwatch:DeleteAlarms"
+                  - "cloudformation:DescribeStackResources"
+                  - "ec2:ModifySecurityGroupRules"
+                  - "rds:CreateDBSubnetGroup"
+                  - "ec2:DescribeSecurityGroups"
+                  - "cloudwatch:PutMetricAlarm"
+                  - "rds:DeleteEventSubscription"
+                  - "ec2:DescribeSecurityGroupRules"
+                  - "ec2:CreateSecurityGroup"
+                  - "cloudwatch:DescribeAlarms"
+                  - "rds:DescribeDBInstances"
+                  - "ec2:DescribeSubnets"
+                  - "ec2:DescribeRouteTables"
+                  - "rds:DeleteDBInstance"
+                  - "rds:AddTagsToResource"
+                  - "rds:RestoreDBInstanceToPointInTime"
+                  - "events:DisableRule"
+                  - "events:EnableRule"
+                  - "events:PutTargets"
+                Resource: "*"
+                
+  rDxcmsTriggerFailoverEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      
+      Description: 'Event that triggers RDS Multi region Failover lambda for every 10 minutes'
+      ScheduleExpression: rate(10 minutes)
+      State: DISABLED
+      Targets:
+        -
+          Arn:
+            Fn::GetAtt:
+              - "rDxcmsRDSMultiRegionDRFailoverLambda"
+              - "Arn"
+          Id: "CheckRdsStatus"
+
+  rDxcmsRDSMultiRegionDRFailoverLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join
+                    - ''
+                    - - "Dxcms-RDS-Multi-Region-DR-Failover-"
+                      - !Select [5, !Split ["-", !Ref "AWS::StackName"]]
+      Environment:
+        Variables:
+          FEATURE_NAME: !Ref pFeatureName
+          PRIMARY_REGION: !Ref pPrimaryRegion
+          SERVICENOW_TOPIC: !Ref pcommonserviceNowTopic
+          SECONDARY_REGION_RESOURCES: !Ref pSecondaryresources
+          SECONDARY_SNS_TOPIC: !Ref rDxcmsIncidentTopic
+          CREATE_INCIDENT_LAMBDA: !GetAtt rDxcmsCreateIncidentLambda.Arn
+          SSM_PARAM: !Ref rSSMSecondaryRegionResources
+          ALARMS_SSM_PARAM: !Ref rSSMSecondaryalarmsResources
+
+      Description: 'Handles the RDS Instance failover between regions'
+      Runtime: python3.11
+      Handler: dxcms_rds_multi_region_failover.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt rDxcmsRDSMultiRegionDRFailoverRole.Arn
+      Timeout: 900 
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/dxcms_rds_multi_region_failover.zip"
+
+
+  rSSMSecondaryRegionResources:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Join
+            - ''
+            - - "/DXC/RDS-MYSQL/PRIMARY/TABLE/ITEMS-"
+              - !Select [5, !Split ["-", !Ref "AWS::StackName"]]
+      Description: "Stores the AFD table information"
+      Type: "String"
+      Value: "AWSPE-No Value"
+  
+  rSSMSecondaryalarmsResources:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Join
+            - ''
+            - - "/DXC/RDS-MYSQL/SECONDARYALARMS-"
+              - !Select [5, !Split ["-", !Ref "AWS::StackName"]]
+      Description: "Stores the AFD table information"
+      Type: "String"
+      Value: "AWSPE-No Value"
+  
+          
+  rDxcmsTriggerFailoverLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: "rDxcmsRDSMultiRegionDRFailoverLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "rDxcmsTriggerFailoverEventsRule"
+          - "Arn"
+  
+  
+  rDxcmsCheckRdsFailureEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      
+      Description: 'Event that triggers RDS Multi region Failover lambda when Particular RDS Instance Go Down'
+      EventPattern: {
+        "source": ["aws.health"],
+        "detail-type": ["AWS Health Event"],
+        "detail": {
+          "service": ["RDS"],
+          "eventTypeCategory": ["issue"],
+          "eventTypeCode": ["AWS_RDS_API_ISSUE", "AWS_RDS_CONNECTIVITY_ISSUE", "AWS_RDS_OPERATIONAL_ISSUE"],
+          "statusCode": ["open","closed"]
+        },
+        "resources": [!Ref pDBIdentifier],
+        "region": [!Ref pPrimaryRegion]
+      }
+      State: ENABLED
+      Targets:
+        -
+          Arn:
+            Fn::GetAtt:
+              - "rDxcmsRDSMultiRegionDRFailoverLambda"
+              - "Arn"
+          Id: "RdsFailureCheck"
+
+  rDxcmsCheckRdsFailoverLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: "rDxcmsRDSMultiRegionDRFailoverLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "rDxcmsCheckRdsFailureEventsRule"
+          - "Arn"
+
+  rDxcmsCreateIncidentLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: "rDxcmsCreateIncidentLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "sns.amazonaws.com"
+      SourceArn: !Ref "rDxcmsIncidentTopic"
+
+
+  
+      
+
+  rinvokerDxcmsRDSMultiRegionDRFailoverLambda:
+    Type: Custom::AwsLambdaAlarmsCreate
+    DependsOn: rDxcmsRDSMultiRegionDRFailoverLambda
+    Properties:
+        ServiceToken: !GetAtt rDxcmsRDSMultiRegionDRFailoverLambda.Arn
+        create: true
+
+
+  
+  

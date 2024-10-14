@@ -1,0 +1,1360 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates required resources for Make Manage functionality
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  
+  pSESLayerArn:
+    Type : 'AWS::SSM::Parameter::Value<String>'
+    Default: /DXC/SES/SESLayerLambdaArn
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/MakeManage/S3AssetBucket
+    Description: SSM Parameter for bucket location
+
+  pTracingFlag:
+    Description: "Flag to enable AWS X-Ray tracing (set to Active)
+      for debugging. Default setting is PassThrough."
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/CloudWatch/TracingFlag"
+  
+  pAWSPEDefaultInstanceProfileName:
+    Description: "Default IAM Instance Profile"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/IAMResources/DefaultInstanceProfile"
+
+  pAWSPEDefaultInstanceRole:
+    Description: "Default IAM Instance Role"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/IAMResources/DefaultInstanceRole"
+  
+  pAWSPEDefaultInstanceProfileNameArn:
+    Description: "Default IAM Instance Profile Arn"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/IAMResources/DefaultInstanceProfileArn"
+
+  pMakeManageEnableScheduleJob:
+    Description: "Enable to run the Make Manage CloudWatch rule"
+    Type: String
+    AllowedValues: ["ENABLED", "DISABLED"]
+    Default: "ENABLED"
+  
+  pDXCInstanceAlarmTopic:
+    Description: "SNS Topic for Instances Alarms."
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/Instance/AlarmTopic" 
+
+  pMakeManageLastStateName:
+    Description: "SSM Parameter for Make Manage Last State Name "
+    Type: String
+    Default: "CreateAlarm"
+
+  pMakeManageOutputLocation:
+    Description: "Make Manage Output/report file location (s3key)"
+    Type: String
+    Default: "deploy/make-manage/output/instances-info-summary-report.csv"
+
+  pDXCS3CustomerBucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/CustomerBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for Customer bucket location"
+
+  pMMStepFunctionLogGroup:
+    Description: MM Step Function CloudWatch Log Group
+    Default: /aws/stepfunction/MMStepFunction
+    Type: String
+  
+  # AWSPE-6340 When you create a state machine with logging enabled, 
+  # Step Functions must update your CloudWatch Logs resource policy with the 
+  # log group you specify. To avoid reaching the CloudWatch Logs resource policy size limit, 
+  # prefix your CloudWatch Logs log group names with /aws/vendedlogs/
+  pMMVendedStepFunctionLogGroup:
+    Description: MM Step Function CloudWatch Log Group
+    Default: /aws/vendedlogs/stepfunction/MMStepFunction
+    Type: String
+
+Resources:
+
+  rMMStepFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Ref pMMStepFunctionLogGroup
+  
+  rMMVendedStepFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Ref pMMVendedStepFunctionLogGroup
+
+  rMakeManageLastStateName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "/DXC/SES/Module/MakeManage/MakeManageLastStateName"
+      Type: String
+      Value: !Ref pMakeManageLastStateName
+      Description: "SSM Parameter for Make Manage Last State Name (CreateAlarm)" 
+
+  rMakeManageOutputLocation:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "/DXC/SES/Module/MakeManage/MakeManageOutputLocation"
+      Type: "String"
+      Value:  !Ref pMakeManageOutputLocation
+      Description: "Make Manage Output/report file location (s3key)" 
+
+  rMMParameterSetDdbTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "ParameterSetName"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "ParameterSetName"
+          KeyType: "HASH"
+
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: "Purpose"
+          Value: "Make Manage - Default setting for the MM Instances."
+      TableName: FtMakeManageParameterSet
+
+  rMMInstanceInfoDdbTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "InstanceId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "InstanceId"
+          KeyType: "HASH"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: "Purpose"
+          Value: "Make Manage - Instance information and tags values"
+      TableName: FtMakeManageInstancesInfo
+
+  rMMInstanceAlarmsDdbTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "InstanceId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "InstanceId"
+          KeyType: "HASH"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: "Purpose"
+          Value: "Make Manage - AWSMS supported Instance alarms"
+      TableName: FtMakeManageInstancesAlarms
+
+  rMMInstanceReportDdbTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "InstanceId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "InstanceId"
+          KeyType: "HASH"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: "Purpose"
+          Value: "Make Manage - Processed MM instances report"
+      TableName: FtMakeManageInstancesReport
+
+  rmmInstanceLambdaProcessorRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "SM1ExpLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-instances-processor*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-instances-processor*:log-stream:*'
+              - Effect: "Allow"
+                Action:
+                  - "ec2:DescribeTags"
+                  - "ec2:DescribeInstances"
+                  - "ec2:CreateTags"
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                Resource: 
+                  - '*'
+              - Effect: "Allow"
+                Action:
+                  - "states:StartExecution"
+                Resource: 
+                  - !Ref rMakeManageSystem
+  
+  rCreateAlarmExecutionLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "CreateAlarmLambdaExecution"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:              
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*create-alarm*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*create-alarm*:log-stream:*'
+              - Effect: "Allow"
+                Action:
+                  - "ssm:SendCommand"
+                  - "cloudwatch:PutMetricAlarm"
+                  - "ec2:DescribeInstances"
+                  - "ec2:CreateTags"
+                  - "ssm:DescribeInstanceInformation"
+                  - "ec2:DescribeVolumes"
+                  - "ssm:GetParameters"
+                  - "ssm:GetCommandInvocation"
+                  - "cloudwatch:ListMetrics"
+                  - "cloudwatch:DescribeAlarms"
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
+                Resource: 
+                  - !GetAtt rMMParameterSetDdbTable.Arn
+                  - !GetAtt rMMInstanceInfoDdbTable.Arn
+                  - !GetAtt rMMInstanceAlarmsDdbTable.Arn
+                  - !GetAtt rMMInstanceReportDdbTable.Arn
+
+  rUpdateAlarmExecutionLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "UpdateAlarmLambdaExecution"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:              
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*update-alarm*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*update-alarm*:log-stream:*'
+              - Effect: "Allow"
+                Action:
+                  - ssm:SendCommand
+                  - cloudwatch:PutMetricAlarm
+                  - ec2:DescribeInstances
+                  - ssm:DescribeInstanceInformation
+                  - ec2:DescribeVolumes
+                  - cloudwatch:DescribeAlarms
+                  - ssm:GetParameters
+                  - ssm:GetCommandInvocation
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:Get*
+                  - dynamodb:List*
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FtMakeManageInstancesAlarms
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FtMakeManageInstancesAlarms/stream/*
+                  - !GetAtt rMMParameterSetDdbTable.Arn
+                  - !GetAtt rMMInstanceInfoDdbTable.Arn
+                  - !GetAtt rMMInstanceAlarmsDdbTable.Arn
+                  - !GetAtt rMMInstanceReportDdbTable.Arn
+
+
+  rMakeManageInstanceProcLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-instances-processor'
+      Description: "MM Lambda that Processes the Instances"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/mm_instance_lambda_processor.zip"
+      Environment: 
+        Variables: 
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+          ddbInstAlarmsTableName: !Ref rMMInstanceAlarmsDdbTable
+          ddbInstRepTableName: !Ref rMMInstanceReportDdbTable
+          StateFunArn: !GetAtt rMakeManageSystem.Arn
+      Handler: "makemanage_instance_lambda.lambda_handler"
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rmmInstanceLambdaProcessorRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "MM that Processes the Instances"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  rMakeManageCreateAlarmState:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-sm7-create-alarms'
+      Description: "MM State Machine - Creates Alarms for the Make Manage Instances"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm7_create_alarms.zip"
+      Handler: "dxc_mm_sm7_create_alarms.lambda_handler"
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rCreateAlarmExecutionLambdaRole.Arn
+      Environment:
+        Variables:
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+          ddbInstAlarmsTableName: !Ref rMMInstanceAlarmsDdbTable
+          ddbInstRepTableName: !Ref rMMInstanceReportDdbTable
+          DXCInstanceAlarmTopic: !Ref pDXCInstanceAlarmTopic
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "Custom Lambda for Creating Alarms -
+            CreateAlarms state in Step Function"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  rMakeManageUpdateAlarms:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-update-alarms'
+      Description: "MM - Update Alarms for the Make Manage Instances"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm7_create_alarms.zip"
+      Handler: "mm_update_alarms.lambda_handler"
+      Runtime: python3.11
+      Layers:
+        - !Ref pSESLayerArn
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rUpdateAlarmExecutionLambdaRole.Arn
+      Environment:
+        Variables:
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+          ddbInstAlarmsTableName: !Ref rMMInstanceAlarmsDdbTable
+          DXCInstanceAlarmTopic: !Ref pDXCInstanceAlarmTopic   
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "Update the Alarms of MM Instances"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  # Trigger the UpdateAlarms lambda function on InstanceAlarmsDdbTable item change
+  rUpdateAlarmsLambdaTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      Enabled: True
+      EventSourceArn: !GetAtt rMMInstanceAlarmsDdbTable.StreamArn
+      FunctionName: !GetAtt rMakeManageUpdateAlarms.Arn
+      StartingPosition: LATEST
+
+  rSSMInstallExecLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "SSMInstallExpLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm1-ssm-install*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm1-ssm-install*:log-stream:*'
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:BatchGetItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:PutItem"
+                  - "dynamodb:Scan"
+                  - "ec2:ModifyInstanceAttribute"
+                  - "ec2:DescribeInstances"
+                  - "ec2:DescribeInstanceAttribute"
+                  - "ec2:DescribeInstanceStatus"
+                  - "ec2:StartInstances"
+                  - "ec2:StopInstances"
+                  - "ssm:SendCommand"
+                  - "ssm:GetCommandInvocation"
+                Resource: "*"
+
+  rMakeManageSSMInstallLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-sm1-ssm-install'
+      Description: "MM SSMInstall"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm1_mm_ssm_install.zip"
+      Handler: "ssm_install.lambda_handler"
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rSSMInstallExecLambdaRole.Arn
+      Environment: 
+        Variables: 
+          ddbParameterSetTable: !GetAtt rMMParameterSetDdbTable.Arn
+          ddbInstancesInfoTable: !GetAtt rMMInstanceInfoDdbTable.Arn
+          ddbInstancesReportTable: !GetAtt rMMInstanceReportDdbTable.Arn
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+          ddbInstRepTableName: !Ref rMMInstanceReportDdbTable
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "MM SSMInstall"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  rMMInstanceProfileLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "InstanceProfileLambdaExecution"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:              
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*dxc-awsms-mm-sm2-instance-profile*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*dxc-awsms-mm-sm2-instance-profile*:log-stream:*'
+              
+              - Effect: "Allow"
+                Action:
+                  - "ec2:AssociateIamInstanceProfile"
+                  - "ec2:ReplaceIamInstanceProfileAssociation"
+                  - "ec2:DescribeIamInstanceProfileAssociations"
+                  - "iam:GetInstanceProfile"
+                  - "iam:ListAttachedRolePolicies"
+                  - "iam:AttachRolePolicy"
+                  - "iam:GetInstanceProfile"
+                  - "iam:ListRolePolicies"
+                  - "iam:GetRolePolicy"
+                  - "iam:PutRolePolicy"
+                  - "ssm:DescribeInstanceInformation"
+                  - "ssm:GetCommandInvocation"
+                  - "ssm:SendCommand"
+                  - "ec2:CreateTags"
+                Resource: "*"
+              
+              - Effect: "Allow"
+                Action:
+                  - "iam:PassRole"
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*rDefaultInstanceRole*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/*rDefaultInstanceProfile*'
+              
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
+                Resource: 
+                  - !GetAtt rMMInstanceInfoDdbTable.Arn
+                  - !GetAtt rMMInstanceReportDdbTable.Arn
+                  - !GetAtt rMMParameterSetDdbTable.Arn
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+
+  #to attach default instance profile to MM instances
+  rMMInstanceProfileLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-sm2-instance-profile'
+      Description: "Default instance profile for MM instances"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm2_instance_profile.zip"
+      Handler: "dxc_mm_sm2_instance_profile.lambda_handler"
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rMMInstanceProfileLambdaRole.Arn
+      Environment: 
+        Variables: 
+          ddbInstRepTableName: !Ref rMMInstanceReportDdbTable
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+          DefaultInstanceProfileArn: !Ref pAWSPEDefaultInstanceProfileNameArn
+          DefaultInstanceProfile: !Ref pAWSPEDefaultInstanceProfileName
+          DefaultInstanceRole: !Ref pAWSPEDefaultInstanceRole
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "MM SSMInstall"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  rMakeManageInstanceTaggingLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-sm3-instance-tagging-lambda'
+      Description: "MM SM3 Instance Tagging"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm3_mm_instance_tagging.zip"
+      Environment: 
+        Variables: 
+          ddbParameterSetTable: !GetAtt rMMParameterSetDdbTable.Arn
+          ddbInstancesInfoTable: !GetAtt rMMInstanceInfoDdbTable.Arn
+          ddbInstancesReportTable: !GetAtt rMMInstanceReportDdbTable.Arn
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+          ddbInstRepTableName: !Ref rMMInstanceReportDdbTable
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+          evDXCS3CustomerBucketName: !Ref pDXCS3CustomerBucketName
+      Handler: "main_instance_tagging.lambda_handler"
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rInstanceTaggingExecLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "MM SM3 Instance Tagging"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  rInstanceTaggingExecLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "SM3InstanceTaggingExpLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm3-instance-tagging-lambda*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm3-instance-tagging-lambda*:log-stream:*'
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:PutItem"
+                  - "ec2:CreateTags"
+                  - "ssm:SendCommand"
+                  - "ec2:DescribeInstances"
+                  - "ssm:GetCommandInvocation"
+                  - "ssm:GetParameter"
+                Resource: "*"
+
+  rMakeManageInstancePackageInstallLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-sm4-instance-install-package-lambda'
+      Description: "MM SM4 Instance Package Installation"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm4_mm_instance_package_installation.zip"
+      Environment: 
+        Variables: 
+          ddbParameterSetTable: !GetAtt rMMParameterSetDdbTable.Arn
+          ddbInstancesInfoTable: !GetAtt rMMInstanceInfoDdbTable.Arn
+          ddbInstancesReportTable: !GetAtt rMMInstanceReportDdbTable.Arn
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+          ddbInstRepTableName: !Ref rMMInstanceReportDdbTable
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+          evDXCS3CustomerBucketName: !Ref pDXCS3CustomerBucketName
+      Handler: "dxc_mm_sm4_install_packages.lambda_handler"
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rInstancePackageInstallationExecLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "MM SM4 Instance Package Install"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  rInstancePackageInstallationExecLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "SM4InstancePackageInstallationLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm4-instance-install-package-lambda*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm4-instance-install-package-lambda*:log-stream:*'
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:PutItem"
+                  - "ec2:CreateTags"
+                  - "ssm:SendCommand"
+                  - "ec2:DescribeInstances"
+                  - "ssm:GetCommandInvocation"
+                  - "ssm:GetParameter"
+                Resource: "*"
+
+  rMakeManageInstallCloudwatch:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-sm5-install-cloudwatch-lambda'
+      Description: "MM SM5 Install Cloudwatch"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm5_mm_install_cloudwatch.zip"
+      Environment: 
+        Variables: 
+          ddbParameterSetTable: !GetAtt rMMParameterSetDdbTable.Arn
+          ddbInstancesInfoTable: !GetAtt rMMInstanceInfoDdbTable.Arn
+          ddbInstancesReportTable: !GetAtt rMMInstanceReportDdbTable.Arn
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+          ddbInstRepTableName: !Ref rMMInstanceReportDdbTable
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+          evDXCS3CustomerBucketName: !Ref pDXCS3CustomerBucketName
+      Handler: "main_install_cloudwatch.lambda_handler"
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rInstallCloudwatchExecLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "MM SM5 Install Cloudwatch"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  rInstallCloudwatchExecLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "SM5InstallCloudwatchLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm5-install-cloudwatch-lambda*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm5-install-cloudwatch-lambda*:log-stream:*'
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:PutItem"
+                  - "ec2:CreateTags"
+                  - "ssm:SendCommand"
+                  - "ec2:DescribeInstances"
+                  - "ssm:GetCommandInvocation"
+                  - "ssm:GetParameter"
+                Resource: "*"
+
+  rMakeManageInstallFalcon:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-sm6-install-falcon-lambda'
+      Description: "MM SM6 Install Falcon"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm6_mm_install_falcon.zip"
+      Environment: 
+        Variables: 
+          ddbParameterSetTable: !GetAtt rMMParameterSetDdbTable.Arn
+          ddbInstancesInfoTable: !GetAtt rMMInstanceInfoDdbTable.Arn
+          ddbInstancesReportTable: !GetAtt rMMInstanceReportDdbTable.Arn
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+          ddbInstRepTableName: !Ref rMMInstanceReportDdbTable
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+          evDXCS3CustomerBucketName: !Ref pDXCS3CustomerBucketName
+      Handler: "dxc_mm_sm6_install_falcon.lambda_handler"
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rInstallFalconExecLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "MM SM6 Install Falcon"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  rInstallFalconExecLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "SM6InstallFalconLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm6-install-falcon-lambda*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm6-install-falcon-lambda*:log-stream:*'
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:PutItem"
+                  - "ec2:CreateTags"
+                  - "ssm:SendCommand"
+                  - "ec2:DescribeInstances"
+                  - "ssm:GetCommandInvocation"
+                  - "ssm:GetParameter"
+                Resource: "*"
+
+  rMakeManageInstanceProcLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName:
+        Ref: "rMakeManageInstanceProcLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt rMMTriggerdRule.Arn
+
+  rMakeManageSummaryReportLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "MakeManageSummaryReportLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm8-mm-summary-report*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-mm-sm8-mm-summary-report*:log-stream:*'
+              - Effect: "Allow"
+                Action:
+                  - "ec2:CreateTags"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
+                Resource: 
+                  - !GetAtt rMMInstanceInfoDdbTable.Arn
+                  - !GetAtt rMMInstanceReportDdbTable.Arn
+                  - !GetAtt rMMParameterSetDdbTable.Arn
+              - Effect: Allow
+                Action: 
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: 
+                - !Sub arn:aws:s3:::${pDXCS3CustomerBucketName}
+                - !Sub arn:aws:s3:::${pDXCS3CustomerBucketName}/deploy/make-manage/output/*
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+
+  rMakeManageSummaryReportLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: 'dxc-awsms-mm-sm8-mm-summary-report'
+      Description: "MM Summary Report"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm8_mm_summary_report.zip"
+      Handler: "mm-summary-report.lambda_handler"
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 512
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rMakeManageSummaryReportLambdaRole.Arn
+      Environment: 
+        Variables: 
+          ddbParameterSetTable: !GetAtt rMMParameterSetDdbTable.Arn
+          ddbInstancesInfoTable: !GetAtt rMMInstanceInfoDdbTable.Arn
+          ddbInstancesReportTable: !GetAtt rMMInstanceReportDdbTable.Arn
+          ddbInstInfoTableName: !Ref rMMInstanceInfoDdbTable
+          ddbInstRepTableName: !Ref rMMInstanceReportDdbTable
+          ddbParamSetTableName: !Ref rMMParameterSetDdbTable
+          ppMakeManageLastStateName: !Ref rMakeManageLastStateName
+          ppMakeManageOutputLocationName: !Ref rMakeManageOutputLocation
+          pDXCS3CustomerBucketName :  !Ref pDXCS3CustomerBucketName
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "MM Summary Report"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+  rMMTriggerdRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Event that triggers Instances Processor Lambda"
+      EventPattern:
+        detail-type:
+          - "Tag Change on Resource"
+        source:
+          - "aws.tag"
+        detail:
+          changed-tag-keys:
+            - "dxc_make_manage"
+          service:
+            - "ec2"
+          resource-type:
+            - "instance"
+          tags:
+            dxc_make_manage:
+              - "True"
+              - "true"
+              - "TRUE"
+      Targets:
+        -
+          Arn: !GetAtt rMakeManageInstanceProcLambda.Arn
+          Id: "MMInstLambdaExecRule"
+
+  rStepFunctionLambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - !Sub 'states.${AWS::Region}.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: MakeManageStatesExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                Resource:
+                  - !Sub "${rMakeManageSSMInstallLambda.Arn}:$LATEST"
+                  - !Sub "${rMMInstanceProfileLambda.Arn}:$LATEST"
+                  - !Sub "${rMakeManageInstanceTaggingLambda.Arn}:$LATEST"
+                  - !Sub "${rMakeManageInstancePackageInstallLambda.Arn}:$LATEST"
+                  - !Sub "${rMakeManageInstallCloudwatch.Arn}:$LATEST"
+                  - !Sub "${rMakeManageInstallFalcon.Arn}:$LATEST"
+                  - !Sub "${rMakeManageCreateAlarmState.Arn}:$LATEST"
+                  - !GetAtt rMakeManageSummaryReportLambda.Arn
+
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogDelivery"
+                  - "logs:GetLogDelivery"
+                  - "logs:UpdateLogDelivery"
+                  - "logs:DeleteLogDelivery"
+                  - "logs:ListLogDeliveries"
+                  - "logs:PutResourcePolicy"
+                  - "logs:DescribeResourcePolicies"
+                  - "logs:DescribeLogGroups"
+                Resource: "*"
+  rMakeManageSystem:
+    Type: "AWS::StepFunctions::StateMachine"
+    DependsOn: "rStepFunctionLambdaExecutionRole"
+    Properties:
+      DefinitionString: !Sub |
+        {
+          "Comment": "Make Manage StateMachine",
+          "StartAt": "StateMachineSSMInstall",
+          "States": {
+            "StateMachineSSMInstall": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+              "TimeoutSeconds": 720,
+              "HeartbeatSeconds": 700,
+              "Parameters": {
+                "FunctionName": "${rMakeManageSSMInstallLambda.Arn}:$LATEST",
+                "Payload": {
+                  "InstanceId.$": "$.InstanceId",
+                  "TaskToken.$": "$$.Task.Token",
+                  "ParameterSetName.$": "$.ParameterSetName"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [ {
+                  "ErrorEquals": [ "States.TaskFailed" ],
+                  "Next": "StateMachineMMSummaryReport"
+              } ],
+              "Next": "StateMachineInstanceProfile"
+            },
+            "StateMachineInstanceProfile": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+              "TimeoutSeconds": 720,
+              "Parameters": {
+                "FunctionName": "${rMMInstanceProfileLambda.Arn}:$LATEST",
+                "Payload": {
+                  "InstanceId.$": "$.InstanceId",
+                  "TaskToken.$": "$$.Task.Token",
+                  "ParameterSetName.$": "$.ParameterSetName"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [ {
+                  "ErrorEquals": [ "States.TaskFailed" ],
+                  "Next": "StateMachineMMSummaryReport"
+              } ],
+              "Next": "StateMachineInstanceTagging"
+            },
+            "StateMachineInstanceTagging": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+              "TimeoutSeconds": 900,          
+              "Parameters": {
+                "FunctionName": "${rMakeManageInstanceTaggingLambda.Arn}:$LATEST",
+                "Payload": {
+                  "InstanceId.$": "$.InstanceId",
+                  "ParameterSetName.$": "$.ParameterSetName",
+                  "TaskToken.$": "$$.Task.Token"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [ {
+                  "ErrorEquals": [ "States.TaskFailed" ],
+                  "Next": "StateMachineMMSummaryReport"
+              }],
+              "Next": "StateMachineInstancePackageInstall"
+            },
+            "StateMachineInstancePackageInstall": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+              "TimeoutSeconds": 900,          
+              "Parameters": {
+                "FunctionName": "${rMakeManageInstancePackageInstallLambda.Arn}:$LATEST",
+                "Payload": {
+                  "InstanceId.$": "$.InstanceId",
+                  "ParameterSetName.$": "$.ParameterSetName",
+                  "TaskToken.$": "$$.Task.Token"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [ {
+                  "ErrorEquals": [ "States.TaskFailed" ],
+                  "Next": "StateMachineMMSummaryReport"
+              }],
+              "Next": "StateMachineInstallCloudwatch"
+            },
+            "StateMachineInstallCloudwatch": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+              "TimeoutSeconds": 900,          
+              "Parameters": {
+                "FunctionName": "${rMakeManageInstallCloudwatch.Arn}:$LATEST",
+                "Payload": {
+                  "InstanceId.$": "$.InstanceId",
+                  "ParameterSetName.$": "$.ParameterSetName",
+                  "TaskToken.$": "$$.Task.Token"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [ {
+                  "ErrorEquals": [ "States.TaskFailed" ],
+                  "Next": "StateMachineMMSummaryReport"
+              }],
+              "Next": "StateMachineInstallFalcon"
+            },
+            "StateMachineInstallFalcon": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+              "TimeoutSeconds": 900,          
+              "Parameters": {
+                "FunctionName": "${rMakeManageInstallFalcon.Arn}:$LATEST",
+                "Payload": {
+                  "InstanceId.$": "$.InstanceId",
+                  "ParameterSetName.$": "$.ParameterSetName",
+                  "TaskToken.$": "$$.Task.Token"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [ {
+                  "ErrorEquals": [ "States.TaskFailed" ],
+                  "Next": "StateMachineMMSummaryReport"
+              }],
+              "Next": "StateMachineCreateAlarm"
+            },
+            "StateMachineCreateAlarm": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+              "TimeoutSeconds": 720,
+              "Parameters": {
+                "FunctionName": "${rMakeManageCreateAlarmState.Arn}:$LATEST",
+                "Payload": {
+                  "InstanceId.$": "$.InstanceId",
+                  "ParameterSetName.$": "$.ParameterSetName",
+                  "TaskToken.$": "$$.Task.Token"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [ {
+                  "ErrorEquals": [ "States.TaskFailed" ],
+                  "Next": "StateMachineMMSummaryReport"
+              }],
+              "Next": "StateMachineMMSummaryReport"
+            },
+            "StateMachineMMSummaryReport": {
+              "Type": "Task",
+              "Resource":  "${rMakeManageSummaryReportLambda.Arn}",
+              "TimeoutSeconds": 720,
+              "HeartbeatSeconds": 300,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+      RoleArn: !GetAtt rStepFunctionLambdaExecutionRole.Arn
+      LoggingConfiguration:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+             LogGroupArn: !GetAtt rMMVendedStepFunctionLogGroup.Arn
+        IncludeExecutionData: True
+        Level: ALL
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "MakeManage Step Function"
+        -
+          Key: "Owner"
+          Value: "DXC"

@@ -1,0 +1,1566 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation Template for the AWS Health Report.
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/AwsHealthReport/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCCloudOpsEmailId:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Notification/DXCNotifyEmail
+    Description: SSM Parameter for CloudOps Email Id
+  pDXCSceduleForEventRule:
+    Type: "String" 
+    Default: 'cron(30 1 ? * * *)'
+    Description: 'Enter the Schedule in cron Format for Event Rule for Health Check.'
+  pCloudOpsAccountId:
+    Type: String
+    Default: 'None'
+    Description: 'Enter the Cloudops Account Id, example: 987654321067'
+  pCloudOpsAccountRegion:
+    Type: String
+    Default: 'None'
+    Description: 'Enter the Cloudops Account Region, example: sa-east-1'
+  pSESLayerArn:
+    Type : 'AWS::SSM::Parameter::Value<String>'
+    Default: /DXC/SES/SESLayerLambdaArn
+
+Resources:
+
+  rDxcmsHCCloudOpsAccountIdSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/HealthCheck/CloudOps_Account_Id'
+      Type: String
+      Value: !Ref pCloudOpsAccountId
+      Description: 'SSM Parameter contains the Cloudops Account Id.'
+
+  rDxcmsHCOsDictionarySSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/HealthCheck/Os_Dictionary'
+      Type: String
+      Value: "{'suse':'Suse Linux','ubuntu':'Ubuntu','red hat':'Red Hat Linux','oracle':'Oracle','al2023':'Amazon Linux', 'amazon-linux2':'Amazon linux','sles':'Suse Linux','amzn2':'Amazon Linux','RHEL':'Red Hat Linux', 'AMAZON-LINUX2':'Amazon Linux', 'ORACLE-LINUX':'Oracle','SUSE':'Suse Linux','Ubuntu':'Ubuntu'}"
+      Description: 'SSM Parameter contains supporting os dictionary.'
+
+  rDxcmsAWSHealthCheckNotificationSNS:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    Properties: 
+      Subscription: 
+        - Endpoint: !Ref pDXCCloudOpsEmailId
+          Protocol: email
+        - !Ref 'AWS::NoValue'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportSNS
+      - Key: Owner
+        Value: DXC
+      TopicName: dxcms_hc_sns_failure_notification
+
+  rDxcmsHCLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName:  !Sub 'dxcms_hc_lambda_exec_role_${AWS::Region}'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambdaRole
+      - Key: Owner
+        Value: DXC
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: "/"
+      Policies:
+        - PolicyName: "dxc-hc-lambda"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EC2AccessPermission
+                Action:
+                - ec2:DescribeInstances
+                - ec2:DescribeSnapshots
+                - ec2:DescribeVolumeStatus
+                - ec2:DescribeScheduledInstanceAvailability
+                - ec2:DescribeVolumes
+                - ec2:DescribeAddresses
+                - ec2:CreateTags
+                - ec2:RunInstances
+                - ec2:DescribeInstanceEventWindows
+                - ec2:DescribeVolumeAttribute
+                - ec2:DescribeImportSnapshotTasks
+                - ec2:DescribeScheduledInstances
+                - ec2:CreateSnapshots
+                - ec2:DescribeFleets
+                - ec2:RunScheduledInstances
+                - ec2:DescribeRegions
+                - ec2:CreateSnapshot
+                - ec2:DescribeInstanceStatus
+                - ec2:CopySnapshot
+                - ec2:ReplaceIamInstanceProfileAssociation
+                - ec2:DescribeInstanceTypes
+                - ec2:DescribeImages
+                - ec2:DescribeInstanceAttribute
+                - ec2:DescribeIamInstanceProfileAssociations
+                - ec2:DescribeTags
+                - ec2:DescribeInstanceEventNotificationAttributes
+                - ec2:CreateInstanceEventWindow
+                - ec2:AssociateIamInstanceProfile
+                Resource: "*"
+                Effect: Allow
+
+              - Sid: 'SNSAccessPermission'
+                Effect: Allow
+                Action:
+                - sns:ListTopics
+                - sns:ListSubscriptions
+                - sns:CreatePlatformEndpoint
+                - sns:SetTopicAttributes
+                - sns:Publish
+                - sns:Subscribe
+                - sns:ConfirmSubscription
+                - sns:CreateTopic
+                - sns:GetSubscriptionAttributes
+                - sns:ListSubscriptions
+                - sns:GetEndpointAttributes
+                - sns:SetSubscriptionAttributes
+                Resource: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dxcms_hc*'                                
+
+              - Sid: 'CwLogsAccessPermission'
+                Effect: Allow
+                Action:
+                - logs:CreateLogStream
+                - logs:GetLogEvents
+                - logs:FilterLogEvents
+                - logs:DescribeLogGroups
+                - logs:CreateLogGroup
+                - logs:PutLogEvents
+                - logs:GetLogGroupFields
+                - logs:CreateLogDelivery
+                - logs:GetLogRecord
+                - logs:PutResourcePolicy
+                - logs:GetQueryResults
+                - logs:DescribeResourcePolicies
+                - logs:GetLogDelivery
+                - logs:ListLogDeliveries
+                Resource: "arn:aws:logs:*:*:*"
+              
+              - Sid: 'SecretManagerAccessPermission'
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:DXC-AWSMS-Offerings-SecretKeys*'
+
+              - Sid: dynamoDB
+                Effect: Allow
+                Action:
+                - dynamodb:ListTagsOfResource
+                - dynamodb:DescribeTable
+                - dynamodb:GetItem
+                - dynamodb:BatchGetItem
+                - dynamodb:ConditionCheckItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:CreateTable
+                - dynamodb:UpdateTable
+                - dynamodb:GetRecords
+                Resource: 
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_Health_Report"
+
+              - Sid: 'CwAccessPermission'
+                Effect: Allow
+                Action:
+                - cloudwatch:ListTagsForResource                               
+                - cloudwatch:TagResource
+                - cloudwatch:GetMetricData
+                Resource: "*"
+
+              - Sid: 'EventBridgeAccessPermission'
+                Effect: Allow
+                Action:
+                  - events:DescribeRule
+                  - events:ListTagsForResource
+                  - events:DescribeEventSource
+                  - events:ListRuleNamesByTarget
+                  - events:ListRules
+                  - events:ListTargetsByRule
+                  - events:ListEventSources
+                Resource: '*'
+                                
+
+              - Sid: 'SSMAccessPermission'
+                Effect: Allow
+                Action: 
+                  - ssm:SendCommand
+                  - ssm:CancelCommand
+                  - ssm:ListCommands
+                  - ssm:ListInstanceAssociations
+                  - ssm:DescribeAutomationExecutions
+                  - ssm:DescribeAutomationStepExecutions
+                  - ssm:ListResourceDataSync
+                  - ssm:ListDocuments                                   
+                  - ssm:DescribeDocument
+                  - ssm:ListAssociationVersions
+                  - ssm:GetDocument
+                  - ssm:GetParametersByPath
+                  - ssm:DescribeInstanceInformation
+                  - ssm:ListTagsForResource
+                  - ssm:DescribeDocumentParameters
+                  - ssm:GetParameter                 
+                  - ssm:DescribeParameters                  
+                  - ssm:GetConnectionStatus
+                  - ssm:GetParameters                  
+                  - ssm:PutParameter
+                  - ssm:ListCommandInvocations                 
+                  - ssm:DescribeInstanceAssociationsStatus
+                  - ssm:DescribeInstanceProperties
+                  - ssm:GetDeployablePatchSnapshotForInstance
+                  - ssm:GetParameterHistory
+                  - ssm:DescribeMaintenanceWindowTargets
+                  - ssm:DescribeEffectiveInstanceAssociations
+                  - ssm:DescribeInventoryDeletions
+                  - ssm:GetInventory
+                  - ssm:DescribeActivations
+                  - ssm:GetCommandInvocation                
+                  - ssm:ListAssociations
+                Resource: "*"
+
+              - Sid: 'SESAccessPermission'
+                Effect: Allow
+                Action: 
+                  - ses:SendEmail
+                  - ses:SendTemplatedEmail
+                  - ses:ListVerifiedEmailAddresses
+                  - ses:ListIdentities
+                  - ses:VerifyEmailAddress
+                  - ses:SendRawEmail
+                  - ses:ListIdentityPolicies
+                  - ses:DescribeActiveReceiptRuleSet
+                  - ses:VerifyEmailIdentity
+                  - ses:SendCustomVerificationEmail
+                  - ses:CreateTemplate
+                  - ses:CreateEmailIdentity
+                  - ses:GetIdentityVerificationAttributes
+                  - ses:ListTemplates
+                  - ses:ListCustomVerificationEmailTemplates
+                  - ses:GetCustomVerificationEmailTemplate
+                Resource: "*"
+
+              - Sid: 'IAMPassroleAccessPermission'
+                Effect: Allow
+                Action:
+                - iam:GetRole
+                - iam:PassRole
+                Resource: 
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/dxcms_hc_state_machine_exec_role_${AWS::Region}'
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/dxcms_hc_iam_sns_role_${AWS::Region}'
+                
+              - Sid: 'IAMAccountAliasesAccessPermission'
+                Effect: Allow
+                Action:
+                - iam:ListAccountAliases
+                Resource: "*"
+
+              - Sid: 'S3Access'
+                Effect: Allow
+                Action:
+                - s3:CreateBucket
+                - s3:GetObjectAcl
+                - s3:GetBucketNotification
+                - s3:ListMultipartUploadParts
+                - s3:PutObject
+                - s3:GetObject
+                - s3:ListBucket
+                - s3:GetBucketVersioning
+                - s3:ListAllMyBuckets
+                - s3:GetBucketLocation
+                - s3:GetObjectVersion
+                - s3:DeleteObject
+                Resource: 
+                  - !Sub "arn:aws:s3:::dxcms.healthreports.${AWS::AccountId}.${AWS::Region}"
+                  - !Sub "arn:aws:s3:::dxcms.healthreports.${AWS::AccountId}.${AWS::Region}/*"
+
+              - Sid: 'RDSAccessPermission'
+                Effect: Allow
+                Action:
+                - rds:DescribeDBInstances
+                - rds:DescribeDBSnapshots
+                Resource: "*"
+              
+              - Sid: 'CostExplorerAccess'
+                Effect: Allow
+                Action:
+                - ce:GetCostAndUsage
+                Resource: "*"
+
+              - Sid: lambdaAccessPermission
+                Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_hc_*'
+
+              - Sid: StateMachineAccessPermission
+                Effect: Allow
+                Action:
+                - states:StartExecution
+                - states:DescribeExecution
+                - states:StopExecution
+                - states:SendTaskSuccess
+                - states:SendTaskFailure
+                Resource: 
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_hc_sfn*'
+
+  rDxcmsHCStateMachineExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'dxcms_hc_state_machine_exec_role_${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'states.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: dxc-hc-ply-statemachine
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: GlobalItems
+                Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_hc_*'
+                
+              - Sid: 'CloudWatchLogs'
+                Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:GetLogEvents
+                  - logs:PutLogEvents
+                  - logs:UpdateLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutRetentionPolicy
+                  - logs:CreateLogGroup
+                Resource: "*"
+
+              - Sid: 'StateMachineExecution'
+                Effect: Allow
+                Action:
+                  - states:StartExecution
+                  - states:DescribeExecution
+                  - states:StopExecution
+                Resource: 
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_hc_sfn*'
+                                
+              - Sid: 'eventbridge'
+                Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                  - events:PutEvents
+                Resource: 
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForStepFunctionsExecutionRule'
+              - Sid: 'SNSPermission'
+                Effect: Allow
+                Action:
+                - sns:Publish
+                - sns:Subscribe
+                - sns:ConfirmSubscription
+                - sns:CreateTopic
+                - sns:ListSubscriptions
+                - sns:SetSubscriptionAttributes
+                Resource: "*"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportStateMachineRole
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsHCDynamoDbTable: 
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      BillingMode: 'PAY_PER_REQUEST'
+      AttributeDefinitions: 
+        - 
+          AttributeName: "AWS_HealthCheck_UUI"
+          AttributeType: "S"
+      KeySchema: 
+        - 
+          AttributeName: "AWS_HealthCheck_UUI"
+          KeyType: "HASH"
+      TableName: "Ft_Dxcms_Health_Report"
+
+  rDxcmsHCSNSRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'dxcms_hc_iam_sns_role_${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub 'ssm.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: !Sub 'DxcmsHealthCheck-SNS-${AWS::Region}'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+            - Sid: 'SNS'
+              Effect: Allow
+              Action:
+              - sns:Publish
+              Resource: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dxcms_hc_sns_*'
+
+            - Sid: LambdaInvokeFunction
+              Effect: Allow
+              Action:
+                - 'lambda:InvokeFunction'
+              Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_hc_*'
+      Tags:
+      - Key: Application  
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: "rDxcmsHealthReport"
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsHCLogFailureEventsSNSTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    Properties: 
+      Subscription: 
+        - Endpoint: !GetAtt 
+                    - rDxcmsHCRecordCmdIdStatusLambda
+                    - Arn
+          Protocol: lambda
+        - !Ref 'AWS::NoValue'
+      Tags:
+      - Key: Application  
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: "rDxcmsHealthReport"
+      - Key: Owner
+        Value: DXC
+      TopicName: dxcms_hc_sns_log_failure_events
+
+  rDxcmsHCLogFailureEventsLambdaInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref rDxcmsHCLogFailureEventsSNSTopic
+      FunctionName: !GetAtt rDxcmsHCRecordCmdIdStatusLambda.Arn
+
+  rDxcmsHCRecordCmdIdStatusLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: record_cmd_id_status.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/record_cmd_id_status.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_record_cmd_id_status'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsHCRecordCmdIdStatusCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCRecordCmdIdStatusLambda
+
+  rDxcmsHCScheduledEventIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'dxcms_hc_iam_event_role_${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                  - Fn::Sub: "events.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        -
+          PolicyName: StateMachineExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "stepFunction"
+                Effect: "Allow"
+                Action: "states:StartExecution"
+                Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_hc_sfn*
+
+  rDxcmshcCrossAccountExceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'dxcms_hc_cross_account_exce_role_${AWS::Region}'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsAWSHealthChecksLambdaRole
+      - Key: Owner
+        Value: DXC
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: !Sub 'dxcms-healthcheck-crossaccount-access_${AWS::Region}'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Sid: 'S3BucketPermission'
+              Effect: Allow
+              Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:ListBucket
+              Resource: 
+                - !Sub 'arn:aws:s3:::dxcms.healthreports.${AWS::AccountId}.${AWS::Region}'
+                - !Sub 'arn:aws:s3:::dxcms.healthreports.${AWS::AccountId}.${AWS::Region}/*'
+                - !Sub 'arn:aws:s3:::dxcms.healthreports.cloudops.${pCloudOpsAccountId}.${pCloudOpsAccountRegion}'
+                - !Sub 'arn:aws:s3:::dxcms.healthreports.cloudops.${pCloudOpsAccountId}.${pCloudOpsAccountRegion}/*'
+            - Sid: 'DynamoDBPermission'
+              Effect: Allow
+              Action: 
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: 
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_Health_Report'
+            - Sid: 'StepFunctionPermission'
+              Effect: Allow
+              Action:
+                - states:StartExecution
+                - states:DescribeExecution
+                - states:StopExecution
+                - states:SendTaskSuccess
+                - states:SendTaskFailure
+              Resource: 
+                - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_hc_sfn*'
+            - Sid: 'SSMAccessPermission'
+              Effect: Allow
+              Action: 
+                - ssm:GetParameter
+                - ssm:GetParameters
+              Resource: 
+                - '*'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsAWSHealthReportLambdaRole
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsHCScheduledEventRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Scheduled event rule to trigger the AWS Dorm Health Check State Machine."
+      ScheduleExpression: !Ref pDXCSceduleForEventRule
+      Name: 'dxcms_aws_dorm_health_check'
+      State: "DISABLED"
+      Targets:
+        -
+          Arn: !Ref rDxcmsHCDormHealthCheckSFN
+          Id: !GetAtt rDxcmsHCDormHealthCheckSFN.Name
+          RoleArn: !GetAtt rDxcmsHCScheduledEventIAMRole.Arn
+          Input: !Join [
+              "",
+              ['{"S3_Bucket":"', !Ref rDxcmsAWSHealthCheckBucket, '","S3_directory_name":"feature_aws_health_reports/"}'],
+            ]
+                   
+  rDxcmsAWSHealthCheckBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties: 
+      AccessControl: Private
+      BucketName: !Sub 'dxcms.healthreports.${AWS::AccountId}.${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportBucket
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsHCCancelCommandIdLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: cancel_command_id.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/cancel_command_id.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_cancel_command_id'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsHCSSMStandardOutputCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/ssm"
+          - "rDxcmsHCSSMCommandStdOut"
+
+  rDxcmsHCCancelCommandIdCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCCancelCommandIdLambda
+
+  rDxcmsHCCheckCommandIDStatusLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: check_command_id_status.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/check_command_id_status.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_check_command_id_status'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCCheckCommandIDStatusCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCCheckCommandIDStatusLambda
+
+  rDxcmsHCGenerateServerHCReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate_server_hc_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+          SSM_CWLogGroupName : !Ref rDxcmsHCSSMStandardOutputCWLG
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate_server_hc_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_generate_server_hc_report'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCGenerateServerHCReportCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCGenerateServerHCReportLambda
+
+  rDxcmsHCServerHCDataProcessingLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: server_hc_data_processing.lambda_handler
+      Layers:
+        - !Ref pSESLayerArn
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn  
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable        
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/server_hc_data_processing.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_server_hc_data_processing'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCServerHCDataProcessingCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCServerHCDataProcessingLambda
+  
+  rDxcmsHCGenerateServerReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate_server_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+          SSM_CWLogGroupName: !Ref rDxcmsHCSSMStandardOutputCWLG
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate_server_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_generate_server_report'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCGenerateServerReportCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCGenerateServerReportLambda
+
+  rDxcmsHCPerformServerHCLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: perform_server_health_check.lambda_handler
+      Layers:
+        - !Ref pSESLayerArn
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+          SSM_CWLogGroupName: !Ref rDxcmsHCSSMStandardOutputCWLG
+          sns_ARN: !Ref rDxcmsHCLogFailureEventsSNSTopic
+          send_cmd_IAM: !GetAtt
+                        - rDxcmsHCSNSRole
+                        - Arn
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/perform_server_health_check.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_perform_server_health_check'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCPerformServerHCCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCPerformServerHCLambda
+
+  rDxcmsHCServerHealthCheckResultLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: server_hc_result.lambda_handler
+      Layers:
+        - !Ref pSESLayerArn
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+          SSM_CWLogGroupName: !Ref rDxcmsHCSSMStandardOutputCWLG
+          perform_server_hc_arn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_hc_perform_server_health_check'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/server_hc_result.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_server_hc_result'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCServerHealthCheckResultCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCServerHealthCheckResultLambda
+
+          
+  rDxcmsHCGenerateUniqueExecIdLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate_unique_execution_id.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate_unique_execution_id.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_generate_unique_execution_id'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCGenerateUniqueExecIdCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCGenerateUniqueExecIdLambda
+
+  rDxcmsHCPutProcessedOutputLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: put_processed_output.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/put_processed_output.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_put_processed_output'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCPutProcessedOutputCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCPutProcessedOutputLambda
+
+  rDxcmsHCSendDataToCloudOpsS3Lambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: push_data_to_cloudOps_bucket.lambda_handler
+      Role: !GetAtt 
+        - rDxcmshcCrossAccountExceRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+          region: !Ref pCloudOpsAccountRegion
+          cloudops_account_id: '/DXC/HealthCheck/CloudOps_Account_Id'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/push_data_to_cloudOps_bucket.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_push_data_to_cloudOps_bucket'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCSendDataToCloudOpsS3CWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCSendDataToCloudOpsS3Lambda
+
+##service healthcheck lambda parts
+  rDxcmsHCGenerateServiceReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate_service_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+          dxcTag : DXCProduct
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate_service_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_generate_service_report'
+      MemorySize: 512
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCGenerateServiceReportLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCGenerateServiceReportLambda
+
+  rDxcmsHCGenerateBackupAvailableReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate_backup_available_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+          dxcTag : DXCProduct
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate_backup_available_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_generate_backup_available_report'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCGenerateBackupAvailableReportCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCGenerateBackupAvailableReportLambda
+
+  rDxcmsHCGenerateSnapshotCountReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate_snapshot_count_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate_snapshot_count_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_generate_snapshot_count_report'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCGenerateSnapshotCountReportLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCGenerateSnapshotCountReportLambda
+
+  rDxcmsHCGenerateUnusedEipsReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate_unused_eips_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate_unused_eips_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_generate_unused_eips_report'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCGenerateUnusedEipsReportLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCGenerateUnusedEipsReportLambda
+
+  rDxcmsHCGenerateUnusedVolumeReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate_unused_volume_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate_unused_volume_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_generate_unused_volume_report'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCGenerateUnusedVolumeReportLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCGenerateUnusedVolumeReportLambda
+
+  rDxcmsHCServiceHcDataProcessingLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: service_hc_data_processing.lambda_handler
+      Layers:
+        - !Ref pSESLayerArn
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/service_hc_data_processing.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_service_hc_data_processing'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCServiceHcDataProcessingLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCServiceHcDataProcessingLambda
+
+  rDxcmsHCServiceHcResultLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: service_hc_result.lambda_handler
+      Layers:
+        - !Ref pSESLayerArn
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/service_hc_result.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_service_hc_result'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCServiceHcResultLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCServiceHcResultLambda
+
+  rDxcmsHCSnapshotDeleteOnTagReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: snapshot_deleteOn_tag_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/snapshot_deleteOn_tag_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_snapshot_deleteOn_tag_report'
+      MemorySize: 512
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCSnapshotDeleteOnTagReportLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCSnapshotDeleteOnTagReportLambda
+
+  rDxcmsHCSnowCommunicationReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: snow_communication_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/snow_communication_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_snow_communication_report'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCSnowCommunicationReportLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCSnowCommunicationReportLambda
+
+  rDxcmsHCRDSCapacityReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: rds_capacity_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/rds_capacity_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_rds_capacity_report'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCRDSCapacityReportLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCRDSCapacityReportLambda
+
+  rDxcmsHCCostSpikeReportLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: cost_spike_report.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsHCLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsHCDynamoDbTable
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/cost_spike_report.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_hc_cost_spike_report'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthReportLambda
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsHCCostSpikeReportLambdaCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsHCCostSpikeReportLambda
+
+  rDxcmsHCPerformServerHealthCheckSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms_hc_sfn_perform_server_health_checks'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/dxcms_hc_sfn_perform_server_health_checks/dxcms_hc_sfn_perform_server_health_checks.json'
+      DefinitionSubstitutions:
+        perform_health_checks: !GetAtt
+          - rDxcmsHCPerformServerHCLambda
+          - Arn
+        check_hc_ssm_command_status: !GetAtt 
+          - rDxcmsHCCheckCommandIDStatusLambda
+          - Arn
+        generate_health_check_report: !GetAtt 
+          - rDxcmsHCGenerateServerHCReportLambda
+          - Arn
+        terminate_hc_ssm_command: !GetAtt 
+          - rDxcmsHCCancelCommandIdLambda
+          - Arn
+        process_hc_reports: !GetAtt 
+          - rDxcmsHCServerHCDataProcessingLambda
+          - Arn
+        server_health_check_result: !GetAtt 
+          - rDxcmsHCServerHealthCheckResultLambda
+          - Arn
+        generate_unique_name_for_health_check_SFN: !GetAtt 
+          - rDxcmsHCGenerateUniqueExecIdLambda
+          - Arn
+        Call_SFN_to_perform_service_health_check: !GetAtt 
+          - rDxcmsHCPerformServiceHealthCheckSFN
+          - Arn
+        Notify_Failure: !Ref rDxcmsAWSHealthCheckNotificationSNS
+      RoleArn: !GetAtt 
+        - rDxcmsHCStateMachineExecutionRole
+        - Arn
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsHealthCheckSFNCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL'
+
+  rDxcmsHCPerformServiceHealthCheckSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms_hc_sfn_perform_service_health_checks'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/dxcms_hc_sfn_perform_service_health_checks/dxcms_hc_sfn_perform_service_health_checks.json'
+      DefinitionSubstitutions:
+        generate_service_report: !GetAtt
+          - rDxcmsHCGenerateServiceReportLambda
+          - Arn
+        generate_unused_eips_report: !GetAtt 
+          - rDxcmsHCGenerateUnusedEipsReportLambda
+          - Arn
+        generate_unused_volume_report: !GetAtt 
+          - rDxcmsHCGenerateUnusedVolumeReportLambda
+          - Arn
+        generate_snapshot_count_report: !GetAtt 
+          - rDxcmsHCGenerateSnapshotCountReportLambda
+          - Arn
+        snapshot_deleteOn_tag_report: !GetAtt 
+          - rDxcmsHCSnapshotDeleteOnTagReportLambda
+          - Arn
+        generate_backup_available_report: !GetAtt 
+          - rDxcmsHCGenerateBackupAvailableReportLambda
+          - Arn
+        generate_cost_spike_report: !GetAtt 
+          - rDxcmsHCCostSpikeReportLambda
+          - Arn
+        generate_rds_capacity_report: !GetAtt 
+          - rDxcmsHCRDSCapacityReportLambda
+          - Arn
+        generate_snow_communication_report: !GetAtt 
+          - rDxcmsHCSnowCommunicationReportLambda
+          - Arn
+        service_hc_data_processing: !GetAtt 
+          - rDxcmsHCServiceHcDataProcessingLambda
+          - Arn
+        service_hc_result: !GetAtt 
+          - rDxcmsHCServiceHcResultLambda
+          - Arn
+        Notify_Failure: !Ref rDxcmsAWSHealthCheckNotificationSNS
+      RoleArn: !GetAtt 
+        - rDxcmsHCStateMachineExecutionRole
+        - Arn
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsHealthCheckSFNCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL'
+
+
+  rDxcmsHCDormHealthCheckSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms_hc_sfn_dorm_health_check'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/dxcms_hc_sfn_aws_dorm_health_checks/dxcms_hc_sfn_aws_dorm_health_checks.json'
+      DefinitionSubstitutions:
+        generate_server_report: !GetAtt
+          - rDxcmsHCGenerateServerReportLambda
+          - Arn
+        generate_unique_name_for_health_check_SFN: !GetAtt 
+          - rDxcmsHCGenerateUniqueExecIdLambda
+          - Arn
+        Call_SFN_to_perform_health_check: !GetAtt 
+          - rDxcmsHCPerformServerHealthCheckSFN
+          - Arn
+        put_processing_output: !GetAtt
+          - rDxcmsHCPutProcessedOutputLambda
+          - Arn
+        send_data_to_cloudops_s3: !GetAtt
+          - rDxcmsHCSendDataToCloudOpsS3Lambda
+          - Arn
+        Notify_Failure: !Ref rDxcmsAWSHealthCheckNotificationSNS
+      RoleArn: !GetAtt 
+        - rDxcmsHCStateMachineExecutionRole
+        - Arn
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsHealthCheckSFNCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL'
+
+
+  rDxcmsHealthCheckSFNCWLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 60
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/vendedlogs/DXCHealthCheckSFNCWLogGroup"
+

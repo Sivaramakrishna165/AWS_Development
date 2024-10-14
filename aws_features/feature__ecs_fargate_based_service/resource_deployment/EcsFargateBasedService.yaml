@@ -1,0 +1,347 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: The template used to create an ECS Task Definition and ECS Service using Cloudformation.
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/EcsFargateBasedService/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+  pSESLayerArn:
+    Description: "SSM parameter for Lambda Layer ARN"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/SES/SESLayerLambdaArn
+  pECSFargateClusterArn:
+    Type: String
+    Default: ''
+    Description: Provide the ECS Fargate cluster Arn here.
+  pECRImageURI:
+    Type: String
+    Default: ''
+    Description: Provide container Image URI where we need to provide Image URI <Fetch this URI from ECR repo>.
+  pECSFargateTaskCpu:
+    Type: String
+    Default: ''
+    Description: Provide the number of cpu units reserved for the container, This can be modified as per container cpu requirement. I was using 0.5 vCPU (512) while my testing.
+  pECSFargateTaskMemory:
+    Type: String
+    Default: ''
+    Description: Provide the amount (in MiB) of memory to present to the container, This can be modified as per container memory requirement. I was using 1GB (1024 MB) while my testing.
+  pECSFargateContainerName:
+    Type: String
+    Default: ''
+    Description: Provide the ECR container name here.
+  pECSFargateContainerLogGroupName:
+    Type: String
+    Default: ''
+    Description: Provide the log group name for ECR container here.
+  pECSFargateContainerPort:
+    Type: String
+    Default: '80'
+    Description: The port number on the container that's bound to the user-specified or automatically assigned host port.
+  pECSFargateLoadBalancerandTGPort:
+    Type: String
+    Default: '80'
+    Description: The port number enabled on the ALB Listener in the Target group to keep track of registered targets and keep them healthy using healthcheck cmd provided in container.
+  pECSFargateCpuArchitecture:
+    Type: String
+    Default: 'X86_64'
+    Description: This is information about the platform for the Amazon ECS service.
+  pECSFargateOperatingSystemFamily:
+    Type: String
+    Default: 'LINUX'
+    Description: The operating system family in which our tasks definitions run on.   
+  pECSFargateServiceName:
+    Type: String
+    Default: ''
+    Description: Provide the ECS Fargate Service Name
+  pDesiredTaskCount:
+    Type: Number
+    Default: 1
+    Description: Provide the ECS service desired count which will maintain desired no of tasks/containers in a ECS Cluster.
+  pVpcId:
+    Type: String
+    Description: Provide the VPC where Feature ECS of Fargate Launch Type based will run on.
+    Default: ''
+    AllowedPattern: "^(?:vpc-[0-9a-f]{8,17}|)$"
+    ConstraintDescription: VPC Id must begin with 'vpc-'.
+  pSecurityGroupInboundPortsone:
+    Type: Number
+    Default: 80
+    Description: Provide the port for Inbound rule as this is default HTTP port as specified
+  pSecurityGroupInboundPortstwo:
+    Type: Number
+    Default: 443
+    Description: Provide the port for Inbound rule as this is default HTTPS port as specified
+  pSecurityGroupOutboundPortsone:
+    Type: Number
+    Default: 80
+    Description: Provide the port for Outbound rule as this is default HTTP port as specified
+  pSecurityGroupOutboundPortstwo:
+    Type: Number
+    Default: 443
+    Description: Provide the port for Outbound rule as this is default HTTPS port as specified
+  pSubnetIds:
+    Type: String
+    Description: Provide the private subnets where ECS Containers will be hosted.
+    Default: 'dummy' 
+  pLoadBalancerName:
+    Type: String
+    Default: ''
+    Description: Provide the load balancer name as ALB will be created while creating and configuring a ECS Fargate Service.
+  pLoadBalancerSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: Provide the public subnets for load balancer as when we hit public DNS of ALB, we can see web application deployed inside the containers.
+  pTargetGroupName:
+    Type: String
+    Default: ''
+    Description: Provide the Target Group name here. 
+
+Conditions:
+  cSubnetNotProvided: !Equals [!Ref pSubnetIds, 'dummy']
+
+Resources:
+  rInvokeGetPrivateSubnets:
+    Type: "Custom::InvokeGetPrivateSubnets"
+    Condition: cSubnetNotProvided
+    Properties:
+      ServiceToken: !Join ["", ["arn:aws:lambda:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":function:getPrivateSubnets"]]
+      VPCID: !Ref pVpcId
+
+  rECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: 'CreateTaskWExecRoleforContagentmakeAPICalls'
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: creatingLogGroup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: "*"
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+        - 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+
+  rECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: 'CreateTaskRoletomakeAPICalls'
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: SsmPermissionforGoingInsideContainer
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+  
+  rECSFargateTasksSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: This SG will be attached to ECS Fargate Service tasks and ALB to bring outside traffic, so that we can view our application deployed via image.
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref pSecurityGroupInboundPortsone
+          ToPort: !Ref pSecurityGroupInboundPortsone
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: !Ref pSecurityGroupInboundPortstwo
+          ToPort: !Ref pSecurityGroupInboundPortstwo
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: !Ref pSecurityGroupOutboundPortsone
+          ToPort: !Ref pSecurityGroupOutboundPortsone
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: !Ref pSecurityGroupOutboundPortstwo
+          ToPort: !Ref pSecurityGroupOutboundPortstwo
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}/ECSFargateTasksSecurityGroup'
+        - Key: Owner
+          Value: DXC
+
+  rCreateFargateTaskdefinition: 
+    Type: AWS::ECS::TaskDefinition
+    Properties: 
+      NetworkMode: awsvpc
+      TaskRoleArn: !GetAtt rECSTaskRole.Arn
+      ExecutionRoleArn: !GetAtt rECSTaskExecutionRole.Arn
+      Cpu: !Ref pECSFargateTaskCpu
+      Memory: !Ref pECSFargateTaskMemory
+      RuntimePlatform:
+        CpuArchitecture: !Ref pECSFargateCpuArchitecture
+        OperatingSystemFamily: !Ref pECSFargateOperatingSystemFamily
+      ContainerDefinitions: 
+        - Name: !Ref pECSFargateContainerName
+          Image: !Ref pECRImageURI
+          PortMappings:
+            - ContainerPort: !Ref pECSFargateContainerPort
+          Essential: true
+          HealthCheck:
+            Command:
+              - "CMD-SHELL"
+              - "curl -f http://localhost/ || exit 1"
+            Interval: 60
+            Retries: 3
+            Timeout: 50
+            StartPeriod: 60
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub "/ecs/${pECSFargateContainerLogGroupName}/${pECSFargateContainerName}"
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref pECSFargateContainerName
+              awslogs-create-group: true
+      RequiresCompatibilities:
+        - "FARGATE"  
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+      - Key: Owner
+        Value: DXC
+      - Key: Name
+        Value: Creating Task Defintion which is later used for creating ECS Fargate service
+
+  rECSFargateService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref pECSFargateClusterArn
+      CapacityProviderStrategy:
+      - CapacityProvider: FARGATE
+        Base: 0
+        Weight: 1
+      TaskDefinition: !Ref rCreateFargateTaskdefinition
+      ServiceName: !Ref pECSFargateServiceName
+      SchedulingStrategy: REPLICA
+      DesiredCount: !Ref pDesiredTaskCount
+      LoadBalancers:
+      - ContainerName: !Ref pECSFargateContainerName
+        ContainerPort: !Ref pECSFargateContainerPort
+        LoadBalancerName: 
+          Ref: AWS::NoValue
+        TargetGroupArn: !Ref rTargetGroup
+      HealthCheckGracePeriodSeconds: '60'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: [!GetAtt rECSFargateTasksSecurityGroup.GroupId]
+          Subnets: !If [cSubnetNotProvided, !Split [ ',', !GetAtt rInvokeGetPrivateSubnets.SubnetIds ], !Split [ ',', !Ref pSubnetIds]]
+      PlatformVersion: LATEST
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      DeploymentController:
+        Type: ECS
+      ServiceConnectConfiguration:
+        Enabled: false
+      Tags: 
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+      - Key: Name
+        Value: service created for running tasks in ECS Fargate as per desired capacity
+      EnableECSManagedTags: true
+    DependsOn:
+    - rListener
+  
+  rLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Name: !Ref pLoadBalancerName
+      SecurityGroups: [!GetAtt rECSFargateTasksSecurityGroup.GroupId]
+      Subnets: !Ref pLoadBalancerSubnetIds
+  rTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: "/"
+      Name: !Ref pTargetGroupName
+      Port: !Ref pECSFargateLoadBalancerandTGPort
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      VpcId: !Ref pVpcId
+  rListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: rTargetGroup
+      LoadBalancerArn: !Ref rLoadBalancer
+      Port: !Ref pECSFargateLoadBalancerandTGPort
+      Protocol: HTTP
+
+Outputs:
+  oClusterName:
+    Description: The cluster used to create the service.
+    Value: !Ref pECSFargateClusterArn
+  oTaskDefinition:
+    Description: Task Definition ARN.
+    Value: !Ref rCreateFargateTaskdefinition
+  oECSFargateTasksSecurityGroup:
+    Description: Security Group to access application with some inbound/outbound rules enabled.
+    Value: 
+      Fn::GetAtt:
+        - rECSFargateTasksSecurityGroup
+        - GroupId
+  oECSServiceArn:
+    Description: The created service which maintains desired count of tasks/containers.
+    Value: !Ref rECSFargateService      
+  oECSServiceName:
+    Description: The created service which maintains desired count of tasks/containers.
+    Value:       
+      Fn::GetAtt:
+        - rECSFargateService
+        - Name   
+  oLoadBalancer:
+    Description: The created load balancer.
+    Value: !Ref rLoadBalancer
+  oLoadBalancerDNS:
+    Description: Load Balancer DNS to access the application.
+    Value: 
+      Fn::GetAtt:
+      - rLoadBalancer
+      - DNSName  
+  oTargetGroup:
+    Description: The created target group associated with Load balancer which has tasks/containers private IP as the registered targets.
+    Value: !Ref rTargetGroup

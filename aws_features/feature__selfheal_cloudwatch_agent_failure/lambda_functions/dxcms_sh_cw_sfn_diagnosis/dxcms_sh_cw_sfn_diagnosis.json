@@ -1,0 +1,334 @@
+{
+  "Comment": "A state machine to perform Diagnosis for CloudWatch Agent Failure Selfheal",
+  "StartAt": "CheckIAMRole",
+  "States": {
+    "CheckIAMRole": {
+      "Comment":"This step will check whether the required IAM Role and Policies are attached to the EC2 Instance.",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${CheckIAMRole}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "CheckIAMRoleError"
+        }
+      ],
+      "Next": "FetchInstanceDetails"
+    },
+    "CheckIAMRoleError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "CheckIAMRole Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "FetchInstanceDetails": {
+      "Comment":"This step will fetch the instance details like ssm connectivity status, os details, instance state, etc.",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${FetchInstanceDetails}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "FetchInstanceDetailsError"
+        }
+      ],
+      "Next": "CheckCWAgentDetails"
+    },
+    "FetchInstanceDetailsError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "FetchInstanceDetails Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "CheckCWAgentDetails": {
+      "Comment":"This step will fetch CW Agent details.",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${CheckCWAgentDetails}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "CheckCWAgentDetailsError"
+        }
+      ],
+      "Next": "Parallel State"
+    },
+    "CheckCWAgentDetailsError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "CheckCWAgentDetails Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "Parallel State": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "SelfHealDiagnosisResult",
+          "States": {
+            "SelfHealDiagnosisResult": {
+              "Type": "Pass",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "StateMachineInfo",
+          "States": {
+            "StateMachineInfo": {
+              "Type": "Pass",
+              "Parameters": {
+                "Execution.$": "$$.Execution.Id",
+                "StateMachine.$": "$$.StateMachine.Name"
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "DynamoDbLogging"
+    },
+    "DynamoDbLogging": {
+      "Comment":"This step will log the CW Diagnosis result in the DynamoDB Table.",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${DynamoDbLogging}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "DynamoDbLoggingError"
+        }
+      ],
+      "Next": "TriggerResolutionSFN"
+    },
+    "DynamoDbLoggingError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "DynamoDbLogging Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "TriggerResolutionSFN": {
+      "Comment":"This step will trigger the CW Reolution step funtcion.",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${TriggerResolutionSFN}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 20
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "TriggerResolutionSFN_error"
+        }
+      ],
+      "End": true
+    },
+    "TriggerResolutionSFN_error": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine": "$$.StateMachine",
+        "ErrorMessageFrom": "TriggerResolutionSFN Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "TriggerNotificationSfnWError": {
+      "Comment":"This step will trigger notification sfn if states caught an error",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+          "FunctionName": "${TriggerNotificationSfnWError}",
+          "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+          }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "TriggerNotificationSfnWErrorError"
+        }
+      ],
+      "Next": "NotifyForLambdaFunctionFailure"
+    },
+    "TriggerNotificationSfnWErrorError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Error.$": "$.Error",
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "TriggerNotificationSfnWError Function"
+      },
+      "Next": "NotifyForLambdaFunctionFailure"
+    },
+    "NotifyForLambdaFunctionFailure": {
+      "Comment":"This step will send an error notification email via SNS.",
+      "Type": "Task",
+      "Resource": "${NotifyForLambdaFunctionFailure}",
+      "TimeoutSeconds": 900,
+      "End": true
+    }
+  }
+}

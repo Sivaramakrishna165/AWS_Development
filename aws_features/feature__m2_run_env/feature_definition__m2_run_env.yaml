@@ -1,0 +1,159 @@
+---
+# Feature Definition (FD) for the Mainframe Modernization (M2) Runtime Environment
+# This feature creates an AWS managed Mainframe Modernization runtime environment 
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: M2RunEnv 
+FeatureParams:
+  pUpdateHash:
+    Default: 0
+    Description: This hash initiates updates to the dxcms-CreateM2EnvLambda lambda
+      This parameter is only used during an updating of the stack and must be changed to a different value.
+      During updating of the stack, this parameter MUST be changed to trigger an update.
+    Type: String
+  pFindSubnets:
+    Description: 'If True, a lambda will be invoked to get the WorkloadVPC v2 private sunbetIds'
+    Type: String
+    Default: True
+  pCreateEfs:
+    Description: 'Default is False. Must deploy feature elastic file system prior to m2_run_env. Currently required for application monitoring. Must also populate pEfsId with a pre-existing EFS Id'
+    Type: String
+    Default: False
+  pM2EnvSuffix:
+    Type : String
+    Default: '1'
+  pM2EnvName:
+    Description: 'M2 environment name with no spaces'
+    Type : String
+    Default: 'M2-env-1'
+  pM2EnvId:
+    Description: 'The unique identifier of the runtime environment, updated during M2 env creation'
+    Type: String
+    Default: 'Dummy'
+  pM2EnvDescription:
+    Description: 'M2 environment description'
+    Type : String
+    Default: 'M2 env 1'
+  pM2EnvSubnet1:
+    Description: 'One of two subnets required for M2 environment creation. Workload VPC v2 private subnets will be used unless overridden in Account Feature Definition table'
+    Type: String
+    Default: 'Dummy1'
+  pM2EnvSubnet2:
+    Description: 'One of two subnets required for M2 environment creation. Workload VPC v2 private subnets will be used unless overridden in Account Feature Definition table'
+    Type: String
+    Default: 'Dummy2'
+  pM2EngineType:
+    Description: 'Select the desired runtime engine: microfocus for replatforming or bluage for refactoring'
+    Type: String
+    Default: 'microfocus'
+    AllowedValues: ['microfocus', 'bluage']
+  pHighAvailabilityConfig:
+    Description: 'One of two subnets required for M2 environment creation. Workload VPC v2 private subnets will be used unless overridden in Account Feature Definition table'
+    Type: String
+    Default: '1'
+    AllowedValues: ['1', '2', '3'] 
+  pInstanceType:
+    Description: 'Instance type for the AWM managed service: Mainframe Modernization. WARNING review pricing before changing: https://aws.amazon.com/mainframe-modernization/pricing/?nc=sn&loc=3'
+    Type: String
+    Default: 'M2.m5.large'
+    AllowedValues: ['M2.m5.large', 'M2.c5.large', 'M2.m6i.large', 'M2.m6i.xlarge', 'M2.m6i.2xlarge', 'M2.c6i.large', 'M2.c6i.xlarge', 'M2.c6i.2xlarge', 'M2.r6i.large', 'M2.r6i.xlarge', 'M2.r6i.2xlarge', 'M2.r6i.4xlarge', 'M2.r5b.large', 'M2.r5b.xlarge', 'M2.r5b.2xlarge'] 
+  pPublicAccess:
+    Description: 'DO NOT CHANGE, public access is set to False by default'
+    Type: String
+    Default: False
+  pSecurityGroupIds:
+    Description: 'Enter the Security Group Ids created from feature Elastic File System and any other non WorkloadVPC v2 SGs required for the m2 runtime environment. Each SG should be enclosed in single quotes, separated by commas, enclosed in brackets to create a list. In DynamoDB do not enclose the list in double quotes.' # Ex: ['sg-0123', 'sg-4567']
+    Type: String
+    Default: 'Dummy'
+  pM2Tags:
+    Description: 'Tags applied to the M2 environment'
+    Type: String
+    Default: "{ 'Owner': 'DXC', 'Name': 'm2_run_env' }"
+  pEfsId:
+    Description: 'The unique identifier of the Elastic File System, updated during EFS creation'
+    Type: String
+    Default: 'Dummy'
+  pEfsPerformanceMode:
+    Description: 'The performance mode of the file system.  maxIO has higher latencies.  Cannot be changed one the filesystem is created'
+    Type: String
+    Default: 'generalPurpose'
+    AllowedValues: ['generalPurpose', 'maxIO'] 
+  pEfsEncryption:
+    Description: 'DO NOT CHANGE, Setting to True will use the default KMS key for Amazon EFS to encrypt the filesystem.'
+    Type: String
+    Default: True
+  pEfsThroughputMode:
+    Description: 'Set to bursting by default for lowest cost with unknown workload traffic'
+    Type: String
+    Default: 'bursting'
+    AllowedValues: ['bursting', 'provisioned'] 
+  pEfsProvisionedThroughputInMibps:
+    Description: "Not used for bursting throughput mode. The throughput, measured in MiB/s, that you want to provision for a file system that you're creating. Valid values are 1-1024"
+    Type: Number
+    Default: 1 
+  pEfsBackup:
+    Description: 'Set to False by default.  EFS uses 3 regions for durability and availability. AWS Backup for EFS is not available in every region'
+    Type: String
+    Default: False
+  pEfsTagList:
+    Description: 'list containing JSON key-value pairs specifying the tags to be applied to EFS'
+    Type: CommaDelimitedList
+    Default: "{ 'Key': 'Owner', 'Value': 'DXC' } "
+  pEfsMountPoint:
+    Description: 'The mount point for the EFS File System'
+    Type: String
+    Default: '/m2/mount/dxc'
+#  Preferred maintenance window is constructed from four parameters to work around SES processing failure of the required syntax wed:03:27-wed:05:27 
+  pPrefMaintWinDay:
+    Description: 'Preferred day of the week for the maintenance window'
+    Type: String
+    Default: 'sat'
+  pPrefMaintWinHrStart:
+    Description: 'Preferred starting hour of the day for the maintenance window'
+    Type: String
+    Default: '03'
+  pPrefMaintWinHrStop:
+    Description: 'Preferred starting hour of the day for the maintenance window'
+    Type: String
+    Default: '05'
+  pPrefMaintWinMin:
+    Description: 'Preferred minute of the associated hour for the maintenance window'
+    Type: String
+    Default: '27'
+  pUpdateEnvEngVer:
+    Description: 'The version of the runtime engine for the environment. If not changing, then specify the current engine version'
+    Type: String
+    Default: 'Dummy'
+  pUpdateInstanceTypeFlag:
+    Description: 'Change to true along with pInstanceType to change the instance type via ses-standards-master stack update'
+    Type: String
+    Default: False
+  pUpdateEngineVersionFlag:
+    Description: 'Change to true along with pUpdateEnvEngVer to change the M2 environment engine version via ses-standards-master stack update'
+    Type: String
+    Default: False
+  pUpdateDesiredCapacityFlag:
+    Description: 'Change to true along with pHighAvailabilityConfig to update the desired capacity of the M2 environment via ses-standards-master stack update'
+    Type: String
+    Default: False
+  pUpdatePrefMaintWinFlag:
+    Description: 'Change to true along with pPrefMaintWinDay, pPrefMaintWinHrStart, pPrefMaintWinHrStop, pPrefMaintWinMin to update the maintenance window of the M2 environment via ses-standards-master stack update'
+    Type: String
+    Default: False
+
+
+Version: '10.0.0.5'
+StandardCreationBatch: 3
+EnableFeature: false
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: This feature creates an AWS managed Mainframe Modernization runtime environment
+AllowDisable: True
+ResourceDeployment:
+  - m2_run_env.yaml

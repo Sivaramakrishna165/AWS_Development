@@ -1,0 +1,374 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: DXC Managed Services - AWS Native BackUp for S3
+
+Parameters:
+
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/NativebackupS3/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+
+  pPlatformVersion:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Main/pPlatformVersion
+    Description: "[DO NOT CHANGE] SSM Parameter for platform version"
+  
+  pfCreateNewKMSKey:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: "Create new KMS key for AWS S3 Backup. If true, specify KeyName parameter, otherwise specify ExistingKeyArn."
+
+  pfKeyName:
+    Type: String
+    Default: 's3-backup-kms'
+    Description: "AWS KMS Key name. Required if CreateNewKMSKey param is true."
+
+  pfAliasName:
+    Type: String
+    Default: 'alias/dxc/s3'
+    Description: "AWS KMS Alias Name. Required if CreateNewKMSKey param is true."     
+
+  pfExistingKeyArn:
+    Type: String
+    Default: "dummy"
+    Description: "KMS Key Arn. Required if CreateNewKMSKey param is false."
+
+  pfCreateNewBackupVault:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+    Description: "Create new Backup Vault for S3 Backup."
+
+  pfBackupVaultName:
+    Type: String
+    Description: "Enter the Backup Vault Name to be created for S3"
+    Default: 'S3BackUpVault'
+
+  pfBackupPlanName:
+    Type: String
+    Default: "S3-BackUp-Plan"
+    Description: "AWS S3 Backup plan name."
+
+  pfBackupRuleName:
+    Type: String
+    Default: "S3-RuleName"
+    Description: "AWS S3 Backup rule name."
+
+  pfS3BackupScheduleExpression:
+    Type: String
+    Default: "cron(15 12 * * ? *)"
+    Description: "AWS Backup cron expression."
+
+  pfBackupDeleteAfterDays:
+    Type: Number
+    Default: 30
+    Description: "Days to expire backups from vault."
+
+  pfBackupSelectionName:
+    Type: String
+    Default: "S3-SelectionName"
+    Description: "AWS Backup selection name."
+
+  pfBackupConditionTagKey:
+    Type: String
+    Default: "aws:ResourceTag/backup"
+    Description: "Tag:Key associated with the resources to back up."
+
+  pfBackupConditionTagValue:
+    Type: String
+    Default: "true"
+    Description: "Tag:Value associated with the resources to back up."
+
+  pfVaultMinRetentionDays:
+    Type: String
+    Default: 30
+    Description: "Retention period in days that the vault retains backup data."
+
+  pfSnowInciPriority:
+    Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor, 4-warning, 5-ok (can be updated if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3', '4', '5']
+
+
+Conditions:
+  cUseDefaultKey: !And [!Equals [!Ref pfCreateNewKMSKey, "false"],!Equals [!Ref pfExistingKeyArn, "dummy"]]
+  cCreateNewKey:  !Equals [!Ref pfCreateNewKMSKey, "true"]
+  cCreateNewBackupVault: !Equals [!Ref pfCreateNewBackupVault, "true"]
+  cDontCreateNewBackupVault: !Equals [!Ref pfCreateNewBackupVault, "false"]
+
+Resources:
+
+  rS3BkUpIamRole:
+    Type: 'AWS::IAM::Role'
+    Properties: 
+      AssumeRolePolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "backup.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+      Description: "Allows AWS Backup to access AWS resources on your behalf to Backup and Restore."
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/AWSBackupServiceRolePolicyForS3Backup
+        - arn:aws:iam::aws:policy/AWSBackupServiceRolePolicyForS3Restore
+      Path: /
+      RoleName: !Join ["-", ["S3NativeBackup", !Ref "AWS::Region"]]
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: "rS3BkUpIamRole"
+      - Key: Owner
+        Value: 'DXC'
+      - Key: Purpose
+        Value: "S3Backup"
+
+  rS3BkUpKMS:
+    Type: 'AWS::KMS::Key'
+    Condition: cCreateNewKey
+    DeletionPolicy: Retain
+    Properties: 
+      Description: A symmetric KMS key to AWS Backup Vault
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: !Ref pfKeyName
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Join 
+                - ''
+                - - 'arn:aws:iam::'
+                  - !Ref 'AWS::AccountId'
+                  - ':root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow AWS Backup IAM Role use of the key
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt rS3BkUpIamRole.Arn
+            Action:
+              - 'kms:DescribeKey'
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey'
+              - 'kms:GenerateDataKeyWithoutPlaintext'
+            Resource: '*'
+      PendingWindowInDays: 30
+      
+  rS3BkUpKMSAlias:
+    Type: 'AWS::KMS::Alias'
+    Condition: cCreateNewKey
+    DependsOn: rS3BkUpKMS
+    Properties:
+      AliasName: !Ref pfAliasName
+      TargetKeyId: !Ref rS3BkUpKMS      
+
+  rS3BackupVault:
+    Type: AWS::Backup::BackupVault
+    DeletionPolicy: Retain
+    Condition: cCreateNewBackupVault
+    Properties:
+      BackupVaultName: !Ref pfBackupVaultName
+      EncryptionKeyArn: !If [cUseDefaultKey, !Ref "AWS::NoValue", !If [cCreateNewKey, !GetAtt rS3BkUpKMS.Arn, !Ref pfExistingKeyArn]]
+      LockConfiguration:
+        MinRetentionDays: !Ref pfVaultMinRetentionDays
+      BackupVaultTags:
+        "Owner" : "DXC"
+
+  rS3BackUpPlan:
+    Type: AWS::Backup::BackupPlan
+    DependsOn: rS3BackupVault
+    Condition: cCreateNewBackupVault
+    Properties:
+      BackupPlan: 
+        BackupPlanName: !Ref pfBackupPlanName
+        BackupPlanRule:
+          - 
+            RuleName: !Ref pfBackupRuleName
+            StartWindowMinutes: 60
+            TargetBackupVault: !Ref pfBackupVaultName
+            ScheduleExpression: !Ref pfS3BackupScheduleExpression
+            Lifecycle: {
+                DeleteAfterDays: !Ref pfBackupDeleteAfterDays
+            }
+
+  rS3BackUpPlanUpd:
+    Type: AWS::Backup::BackupPlan
+    Condition: cDontCreateNewBackupVault
+    Properties:
+      BackupPlan: 
+        BackupPlanName: !Ref pfBackupPlanName
+        BackupPlanRule:
+          - 
+            RuleName: !Ref pfBackupRuleName
+            StartWindowMinutes: 60
+            TargetBackupVault: !Ref pfBackupVaultName
+            ScheduleExpression: !Ref pfS3BackupScheduleExpression
+            Lifecycle: {
+                DeleteAfterDays: !Ref pfBackupDeleteAfterDays
+            }            
+
+  rS3StorageBackupSelection:
+    Type: AWS::Backup::BackupSelection
+    DependsOn: rS3BackUpPlan
+    Condition: cCreateNewBackupVault
+    Properties:
+      BackupPlanId: !Ref rS3BackUpPlan
+      BackupSelection: 
+        SelectionName: !Ref pfBackupSelectionName
+        IamRoleArn: !GetAtt rS3BkUpIamRole.Arn
+        Resources: 
+          - "arn:aws:s3:::*"
+        Conditions:
+          StringEquals:
+            - ConditionKey: !Ref pfBackupConditionTagKey
+              ConditionValue: !Ref pfBackupConditionTagValue
+
+  rS3StorageBackupSelectionUpd:
+    Type: AWS::Backup::BackupSelection
+    DependsOn: rS3BackUpPlanUpd
+    Condition: cDontCreateNewBackupVault
+    Properties:
+      BackupPlanId: !Ref rS3BackUpPlanUpd
+      BackupSelection: 
+        SelectionName: !Ref pfBackupSelectionName
+        IamRoleArn: !GetAtt rS3BkUpIamRole.Arn
+        Resources: 
+          - "arn:aws:s3:::*"
+        Conditions:
+          StringEquals:
+            - ConditionKey: !Ref pfBackupConditionTagKey
+              ConditionValue: !Ref pfBackupConditionTagValue              
+              
+  rS3BkUpLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      RoleName: !Join ["-", ["S3NativeBackupLambdaRole", !Ref "AWS::Region"]]
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rS3BkUpLambdaRole
+      - Key: Owner
+        Value: DXC
+      Policies:
+        - PolicyName: !Join ["-", ["S3NativeBackupLambdaPermissions", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-aws-nativebackup-s3-versioning*"
+              - Effect: Allow
+                Action:
+                  - s3:List*
+                  - s3:GetBucketTagging
+                  - s3:GetBucketVersioning
+                  - s3:PutBucketVersioning
+                Resource: '*'                 
+
+  rS3BkUpLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "dxcms-aws-nativebackup-s3-versioning"
+      Environment:
+        Variables:
+          TagValue: !Ref pfBackupConditionTagKey   
+      Description: 'Check and enable versioning on the S3 buckets'
+      Runtime: python3.11
+      Handler: dxcms_aws_nativebackup_s3_versioning.handler
+      MemorySize: 128
+      Role: !GetAtt rS3BkUpLambdaRole.Arn
+      Timeout: 900
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/dxcms_aws_nativebackup_s3_versioning.zip"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+
+  rS3BkUpTriggerRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Event that triggers s3 versioning lambda"
+      EventPattern:
+        detail-type:
+          - "Tag Change on Resource"
+        source:
+          - "aws.tag"
+        detail:
+          changed-tag-keys:
+            - "backup"
+          service:
+            - "s3"
+          tags:
+            backup:
+              - "true"
+      Targets:
+        -
+          Arn: !GetAtt rS3BkUpLambda.Arn
+          Id: "S3BackupVersioning"
+
+  rS3BkUpLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName:
+        Ref: "rS3BkUpLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt rS3BkUpTriggerRule.Arn
+
+  customInvokeLambda:
+    Type: Custom::AwsLambdaS3Versioning
+    DependsOn: rS3BkUpLambda
+    Properties:
+        ServiceToken: !GetAtt rS3BkUpLambda.Arn          
+
+Outputs:
+  oKMSKeyBackup:
+    Description: S3 KMS Key Arn
+    Value: !If [cCreateNewKey, !GetAtt rS3BkUpKMS.Arn, !Ref pfExistingKeyArn]

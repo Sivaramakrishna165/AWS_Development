@@ -1,0 +1,24 @@
+---
+# Feature Definition (FD) for NativebackupMonitoring
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: NativebackupMonitoring
+Version: '9.0.0.3'
+StandardCreationBatch: 2
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: To create a SNOW incident upon change in backup job state
+AllowDisable: true
+ResourceDeployment:
+  - nativebackup_monitoring.yaml
+DependsOnFeature:
+  - CommonServicenow  
+
+  

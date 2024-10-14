@@ -1,0 +1,61 @@
+---
+# Feature Definition (FD) for CreateHardenedAMIs
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: CreateHardenedAmis
+Version: '9.0.0.5'
+StandardCreationBatch: 4
+EnableFeature: true
+FeatureParams:
+  pCreateAmisCWFrequency:
+    Description: '[Required] Keep 7 days. The schedule (Rate) to trigger CreateHardenedAmis (Change only if required)'
+    Type: String
+    Default: 'rate(7 days)'
+    AllowedValues: ['rate(7 days)', 'rate(15 days)', 'rate(30 days)']
+
+  pEnableCreateHardenedAmisCWRule:
+    Description: '[Required] By default CW rule is set to DISABLED, enable ONLY if necessary'
+    Type: String
+    Default: 'ENABLED'
+    AllowedValues: ['DISABLED', 'ENABLED']
+  pUserProvidedOSTypes:
+    Description: '[Required] Provide OS types for creating the Hardened Amis eg: windows,amazon,suse,oracle,ubuntu,rhel'
+    Type: String
+    Default: ''
+  #pVPCId:
+    #Description: 'VPC Id will be used to create HardenedAmis, VPC should contain Public subnet'
+    #Type: String
+    #Default: ''
+  pRootVolumeEncryption:
+    Description: 'Set True for root volume encryption'
+    Type: String
+    Default: "false"
+    AllowedValues: ["true","false"]
+  pRetentionPeriod:
+    Description: "Retention period of the Custom AMI"
+    Type: "String"
+    Default: "30"
+  pInstanceTypes:
+    Description: 'InstanceTypes for executing the Hardening Amis'
+    Type: String
+    Default: "{
+        'windows': {'InstanceType':'t2.medium'},
+        'oracle-linux': {'InstanceType':'t2.medium'},
+        'rhel': {'InstanceType':'t2.medium'},
+        'suse': {'InstanceType':'t2.large'},
+        'ubuntu': {'InstanceType':'t2.medium'},
+        'amazon-linux': {'InstanceType':'t2.micro'}
+      }"
+  
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Create Hardened Amis and log the status in DyanamoDB table
+AllowDisable: true
+ResourceDeployment:
+  - create_hardened_amis.yaml

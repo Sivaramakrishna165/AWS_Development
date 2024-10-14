@@ -1,0 +1,53 @@
+---
+# Feature Definition (FD) for the AWS Carbonfootprint as a feature 
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AwsCarbonfootprint
+Version: '9.0.0.1'
+StandardCreationBatch: 3
+EnableFeature: False
+FeatureParams:
+  pCarbonFootprintTargetAccountPolicyName:
+    Type: String
+    Default: ""
+    Description: Provide a customer managed policy name which assume a role consists of target accountId attached in IAM Resource section.  
+  pCarbonFootprintSESMailingPolicyName:
+    Type: String
+    Default: ""
+    Description: Provide a customer managed policy name which is assuming mailing based action to send emails to end users.
+  pTargetAccountId:
+    Type: String
+    Default: ""
+    Description: Provide the target account Id of which you need to view the carbon footprint report.
+  pTargetAccountRoleName:
+    Type: String
+    Default: ""
+    Description: Provide the target account role name which is created in the target account.
+  pSourceRegionName:
+    Type: String
+    Default: ""
+    Description: Provide the source region code where you want to create S3 bucket. Ex - us-west-2 etc.  
+  pS3BucketNametoUploadReportinSourceAccount:
+    Type: String
+    Default: ""
+    Description: Provide the S3 bucket name where the carbon footprint report (.json) will be uploaded to similar location like - <accountId>/<ccft_<accountId>_yymm.json>
+  pSenderEmailAddress:
+    Type: String
+    Default: ""
+    Description: Provide a sender email address from where recipient will get email address.
+  pRecipientEmailAddress:
+    Type: String
+    Default: ""
+    Description: Provide a recipient email address to receive carbon footprint report.
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creating a AWS carbon footprint report (.json) and send it to recipient email addresses and this report will be served as an input for PowerBI to represent the carbon emission as per report in graphical format.
+AllowDisable: true
+ResourceDeployment:
+  - AwsCarbonfootprint.yaml

@@ -1,0 +1,410 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'A regional CloudFormation Template for the Lambda_Anomaly_Detection which will perform the diagnosis activity.'
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/SelfhealLambdaAnomalyDetection/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCLambdaAnomalySNSTopicArn:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/AWS-Lambda-Anomaly/SNS-Topic
+    Description: SSM Parameter to store Lambda Anomaly Detection SNS Topic Arn
+  pCloudOpsEmailID:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Notification/DXCNotifyEmail
+    Description: SSM Parameter contains the CloudOps Email_Ids
+  pDXCSelfHealLambdaRoleName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: '/DXC/SelfHeal/LambdaExecutionRoleName'
+    Description: SSM Parameter contains the step function lambda role.
+  pDXCSelfHealSFNRole:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: '/DXC/SelfHeal/StepFunctionExecutionRoleName'
+    Description: SSM Parameter contains the step function execution role.
+  pSenderEmailID:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SelfHeal/SenderEmailId
+    Description: SSM Parameter contains the Sender Email_Ids
+  pDXCDefaultInstanceProfileArn:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: '/DXC/IAMResources/DefaultInstanceProfileArn'
+    Description: SSM Parameter contains Default Instance Profile Arn.
+  pSESLambdaLayerArn:
+    Description: "SSM parameter for Lambda Layer ARN"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/SES/SESLayerLambdaArn
+  pSnowIncidentPriority:
+    Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor (can be updated if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3']
+  pLambdaSortingFilter:
+    Description: '[Required] Accepted Filter Values are: invocation_sum, duration_avg, duration_max, duration_min'
+    Type: String
+    Default: "{'sorting_filter':'invocation_sum','max_number_of_lambda_funcs':10}"
+
+Resources:
+  
+  rDxcmsSHLADSortingFilterSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/SelfHeal/LAD/LambdaSortingFilter'
+      Type: String
+      Value: !Ref pLambdaSortingFilter
+      Description: "SSM Parameter contains the Sorting Filter and maximum number lambda function to diaplay. Note: Accepted Filter Values are: 'invocation_sum', 'duration_avg', 'duration_max', 'duration_min'"
+
+  rDxcmsSHLambdaAnomalySNSTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Properties: 
+      Endpoint: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_sh_lambda_to_trigger_master_sfn'
+      Protocol: lambda
+      TopicArn: !Ref pDXCLambdaAnomalySNSTopicArn
+      Region: !Sub ${AWS::Region}
+
+  rDxcmsSHLambdaAnomalyLambdaToTriggerLADSfnLAInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref pDXCLambdaAnomalySNSTopicArn
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_sh_lambda_to_trigger_master_sfn'
+
+  rDxcmsSHLADFetchLambdaExecutionDetailsLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: fetch_lambda_execution_details.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          table_name: 'Ft_Dxcms_SelfHeal'
+      Description: 'Lambda to fetch lambda execution details'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/fetch_lambda_execution_details.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lad_fetch_lambda_execution_details'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealLambdaAnomalyDetection
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHLADFetchLambdaExecutionDetailsCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHLADFetchLambdaExecutionDetailsLA
+
+  rDxcmsSHLADLambdaAnomalyFilterLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: lambda_anomaly_filter.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          sorting_input_ssm_paramter: !Ref rDxcmsSHLADSortingFilterSSMParameter
+      Description: 'Lambda to sort the lambda details based on ssm parameter filter value.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/lambda_anomaly_filter.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lad_lambda_anomaly_filter'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealLambdaAnomalyDetection
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHLADSendNotificationEmailCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHLADLambdaAnomalyFilterLA 
+
+  rDxcmsSHLADSendNotificationEmailLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: send_notification_email.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          CloudOpsEmailIds: '/DXC/Notification/DXCNotifyEmail'
+          SenderEmailId: '/DXC/SelfHeal/SenderEmailId'
+          MsTeamsChannelEmailId : '/DXC/SelfHeal/MsTeamsChannelEmailId'
+          table_name: 'Ft_Dxcms_SelfHeal'
+      Description: 'Lambda to send the notifications via email.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/send_notification_email.zip'
+      Runtime: python3.11
+      Layers:
+        - !Ref pSESLambdaLayerArn
+      FunctionName: 'dxcms_sh_lad_send_notification_email'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealLambdaAnomalyDetection
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHLADSendNotificationEmailCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHLADSendNotificationEmailLA           
+
+  rDxcmsSHLADSnowDescriptionInputLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: snow_description_input.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          table_name : 'Ft_Dxcms_SelfHeal'
+      Description: 'Lambda to form the description for snow incidents.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/snow_description_input.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lad_snow_description_input'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealLambdaAnomalyDetection
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHLADSnowDescriptionInputCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHLADSnowDescriptionInputLA     
+
+  rDxcmsSHLADTriggerNotificationSfnWErrorLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: trigger_notification_sfn_w_error.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Description: 'Lambda to trigger the notification sfn if states caught an error'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/trigger_notification_sfn_w_error.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lad_trigger_notification_sfn_w_error'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealLambdaAnomalyDetection
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHLADTriggerNotificationSfnWErrorCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHLADTriggerNotificationSfnWErrorLA      
+
+  rDxcmsSHLADTriggerSNSLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: trigger_sns.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          CloudOps_Email_ID: !Ref pCloudOpsEmailID
+          SNS_Topic_Arn: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dxcms_sh_sns_notification'
+      Description: 'Lambda to publish payload to sns topic.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/trigger_sns.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lad_trigger_sns'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealLambdaAnomalyDetection
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHLADTriggerSNSCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHLADTriggerSNSLA       
+
+  rDxcmsSHLADTriggerStepFunctionLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: trigger_step_function.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          notification_sfn_arn: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_sfn_notification'
+      Description: 'Lambda to trigger the step function.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/trigger_step_function.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lad_trigger_step_function'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealLambdaAnomalyDetection
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHLADTriggerSFNCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHLADTriggerStepFunctionLA
+
+  rDxcmsSHLADUpdateDynamoDbLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: update_dynamodb.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          table_name: 'Ft_Dxcms_SelfHeal'
+      Description: 'Lambda to update the DynamoDb table.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/update_dynamodb.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_lad_update_dynamodb'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealLambdaAnomalyDetection
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHLADUpdateDynamoDbCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHLADUpdateDynamoDbLA
+
+  rDxcmsSHLADLambdaAnomalyDiagnosisSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms_sh_lad_sfn_diagnosis'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/dxcms_sh_lad_sfn_diagnosis/dxcms_sh_lad_sfn_diagnosis.json'
+      DefinitionSubstitutions:         
+        FetchLambdaExecutionDetails: !GetAtt 
+          - rDxcmsSHLADFetchLambdaExecutionDetailsLA
+          - Arn
+        LambdaAnomalyFilter: !GetAtt 
+          - rDxcmsSHLADLambdaAnomalyFilterLA
+          - Arn
+        DynamoDbLogging: !GetAtt
+          - rDxcmsSHLADUpdateDynamoDbLA
+          - Arn
+        TriggerNotificationSFN: !GetAtt
+          - rDxcmsSHLADTriggerStepFunctionLA
+          - Arn
+        TriggerNotificationSfnWError: !GetAtt
+          - rDxcmsSHLADTriggerNotificationSfnWErrorLA
+          - Arn
+        NotifyForLambdaFunctionFailure: !GetAtt 
+          - rDxcmsSHLADTriggerSNSLA
+          - Arn
+        SendEmail: !GetAtt 
+          - rDxcmsSHLADSendNotificationEmailLA
+          - Arn
+        SnowDescriptionInput: !GetAtt 
+          - rDxcmsSHLADSnowDescriptionInputLA
+          - Arn
+      RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealSFNRole}'
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsSelfHealLambdaAnomalyCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL' 
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealLambdaAnomalyDetection
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsSelfHealLambdaAnomalyCWLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 60
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/vendedlogs/rDxcmsSelfHealLambdaAnomalyCWLogGroup"

@@ -1,0 +1,23 @@
+---
+# Feature Definition (FD) for create patch baselines
+# This feature will create patch baselines for specific rhel versions and register those baselines to corresponding patch groups (PatchGroup, no space)
+# "PatchGroup" (no space) is required by SSM and Hardening.  "Patch Group" with a space will not use the newly created baseline.
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: CreatePatchBaselines 
+Version: '9.0.0.1'
+StandardCreationBatch: 2
+EnableFeature: true
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: This feature will create patch baselines for specific rhel versions and register those baselines to corresponding patch groups 
+AllowDisable: True
+
+ResourceDeployment:
+  - create_patch_baselines.yaml

@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'A regional template which creates a CloudWatch Anomaly detection lambda functions'
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/CWAnomalyDetection/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'none'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+
+Resources:
+  rDxcmsADEC2ScheduleRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Name: !Sub "dxcms-cw-create-anomaly-alarm-${AWS::Region}"
+      EventPattern:
+        source: 
+        - "aws.tag"
+        detail-type: 
+        - "Tag Change on Resource"
+        detail: 
+          changed-tag-keys: 
+          - "adalarm"
+          service: 
+          - "ec2"
+          resource-type: 
+          - "instance"
+      State: ENABLED
+      Targets: 
+        - 
+          Arn: !GetAtt
+            - rDxcmsCWCreateAnomalyAlarmLA
+            - Arn
+          Id: LambdafunctionRole
+
+  rDxcmsADPermissionForEventsToInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Sub "dxcms-cw-create-anomaly-detection-ec2-alarm-${AWS::Region}"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - "rDxcmsADEC2ScheduleRule"
+          - "Arn"
+          
+  rDxcmsADEC2DynamoDBTable: 
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      BillingMode: 'PAY_PER_REQUEST'
+      AttributeDefinitions: 
+        - 
+          AttributeName: "Metric Name"
+          AttributeType: "S"
+      KeySchema: 
+        - 
+          AttributeName: "Metric Name"
+          KeyType: "HASH"
+      TableName: "Ft_Dxcms_Anomalydetection_EC2"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsAnomalyDetectionDynamoDbTable
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsCWLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName:  !Sub 'dxcms_cw_lambda_exec_role_${AWS::Region}'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsCWAnomalyDetectionLambdaRole
+      - Key: Owner
+        Value: DXC
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: "/"
+      Policies:
+        - PolicyName: !Sub "Dxcms-cw-lambda_${AWS::Region}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+
+              - Sid: 'DynamoDBAccessPermisson'
+                Effect: Allow
+                Action:
+                - dynamodb:Scan
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                Resource: 
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_Anomalydetection_EC2/stream/*"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_Anomalydetection_EC2/index/*"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_Anomalydetection_EC2"        
+
+              - Sid: EC2AccessPermission
+                Action:
+                - ec2:DescribeInstances
+                Resource: "*"
+                Effect: Allow
+
+              - Sid: SSMParamteraccess
+                Action:
+                - ssm:GetParameter
+                Effect: Allow
+                Resource: "*"                              
+
+              - Sid: lambdaAccessPermission
+                Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_cw_*'
+
+              - Sid: S3AccessPermission
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: 
+                - !Sub 'arn:aws:s3:::dxc.customer.config-${AWS::AccountId}-${AWS::Region}/*'
+                - !Sub 'arn:aws:s3:::cloudops-anomaly-detection-reports/*'
+                Effect: Allow 
+
+              - Sid: CWAccessPermission
+                Action:
+                  - "cloudwatch:DescribeAlarmsForMetric"
+                  - "cloudwatch:DisableAlarmActions"
+                  - "cloudwatch:PutMetricAlarm"
+                  - "cloudwatch:EnableAlarmActions"
+                  - "cloudwatch:DescribeAlarms"
+                Resource: "*"
+                Effect: Allow 
+
+  rDxcmsCWCreateAnomalyAlarmLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: create_anomaly_detection_ec2_alarm.lambda_handler
+      Role: !GetAtt
+        - rDxcmsCWLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: "Ft_Dxcms_Anomalydetection_EC2"
+          customer_name: "/DXC/Main/CustomerName"
+      Description: 'Lambda to create the anomaly alarm and disable the static alarm'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/create_anomaly_detection_ec2_alarm.zip'
+      Runtime: python3.11
+      FunctionName: !Sub "dxcms-cw-create-anomaly-detection-ec2-alarm-${AWS::Region}"
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: !Sub "dxcms-cw-create-anomaly-detection-ec2-alarm-${AWS::Region}"
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsCWEC2DynamodDBLambdaLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: load_dynamodb_ec2.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsCWLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: "Ft_Dxcms_Anomalydetection_EC2"
+          sns_topic_arn: "/DXC/Instance/AlarmTopic"
+      Description: 'Lambda to load the data into dynamodb'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/load_dynamodb_ec2.zip'
+      Runtime: python3.11
+      FunctionName: !Sub "dxcms-cw-load-dynamodb-ec2-alarm-${AWS::Region}"
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: !Sub "dxcms-cw-load-dynamodb-ec2-alarm-${AWS::Region}"
+      - Key: Owner
+        Value: DXC
+
+  customInvokeLoaddynamodbLambda:
+    Type: Custom::AwsLambdaLoadDynamodb
+    DependsOn: rDxcmsCWEC2DynamodDBLambdaLA
+    Properties:
+        ServiceToken: !GetAtt rDxcmsCWEC2DynamodDBLambdaLA.Arn
+        pUpdateHash: !Ref pAutoUpdateHash
+
+  

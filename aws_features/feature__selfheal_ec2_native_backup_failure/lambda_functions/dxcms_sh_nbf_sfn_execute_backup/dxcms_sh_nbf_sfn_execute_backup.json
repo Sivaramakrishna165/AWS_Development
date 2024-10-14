@@ -1,0 +1,678 @@
+{
+  "Comment": "SelfHeal State machine for executing native backup for ec2 instance",
+  "StartAt": "ChoiceBackupType",
+  "States": {
+    "ChoiceBackupType": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.instance_os_type",
+              "StringEquals": "linux"
+            },
+            {
+              "Variable": "$.backup_level_assigned",
+              "StringEquals": "1"
+            },
+            {
+              "Variable": "$.backup_iam_status",
+              "StringEquals": "present"
+            }
+          ],
+          "Next": "LinuxLevel1Backup"
+        },
+        {
+          "And": [
+            {
+              "Variable": "$.instance_os_type",
+              "StringEquals": "linux"
+            },
+            {
+              "Variable": "$.backup_level_assigned",
+              "StringEquals": "2"
+            },
+            {
+              "Variable": "$.issue_resolution_status",
+              "BooleanEquals": true
+            }
+          ],
+          "Next": "LinuxLevel2Backup"
+        },
+        {
+          "And": [
+            {
+              "Variable": "$.instance_os_type",
+              "StringEquals": "windows"
+            },
+            {
+              "Variable": "$.backup_level_assigned",
+              "StringEquals": "2"
+            },
+            {
+              "Variable": "$.backup_iam_status",
+              "StringEquals": "present"
+            }
+          ],
+          "Next": "WindowsLevel2Backup"
+        },
+        {
+          "And": [
+            {
+              "Variable": "$.instance_os_type",
+              "StringEquals": "windows"
+            },
+            {
+              "Variable": "$.backup_level_assigned",
+              "StringEquals": "1"
+            },
+            {
+              "Variable": "$.backup_iam_status",
+              "StringEquals": "present"
+            }
+          ],
+          "Next": "WindowsLevel1Backup"
+        }
+      ],
+      "Default": "BackupFailure"
+    },
+    "WindowsLevel1Backup": {
+      "Comment": "This step will trigger windows level 1 backup",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:backup:startBackupJob",
+      "Parameters": {
+        "BackupVaultName.$": "$.vault_name",
+        "IamRoleArn.$": "States.Format('arn:aws:iam::{}:role/EC2WindowsLevel1NativeBackup-{}',$.account_id,$.region)",
+        "ResourceArn.$": "States.Format('arn:aws:ec2:{}:{}:instance/{}',$.region,$.account_id,$.instance_id)",
+        "Lifecycle.$": "$.retention_period"
+      },
+      "ResultSelector": {
+        "backup_job_id.$": "$.BackupJobId"
+      },
+      "ResultPath": "$.backup_job_output",
+      "Next": "WaitBackupJobCompletion",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.HeartbeatTimeout",
+            "States.Permissions"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed",
+            "States.Runtime"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "BackupFailure"
+        }
+      ]
+    },
+    "WindowsLevel2Backup": {
+      "Comment": "This step will trigger windows level 2 backup",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:backup:startBackupJob",
+      "Parameters": {
+        "BackupVaultName.$": "$.vault_name",
+        "IamRoleArn.$": "States.Format('arn:aws:iam::{}:role/EC2WindowsLevel2NativeBackup-{}',$.account_id,$.region)",
+        "ResourceArn.$": "States.Format('arn:aws:ec2:{}:{}:instance/{}',$.region,$.account_id,$.instance_id)",
+        "Lifecycle.$": "$.retention_period",
+        "RecoveryPointTags": {
+          "FSConsistent": "True"
+        },
+        "BackupOptions": {
+          "WindowsVSS": "enabled"
+        }
+      },
+      "ResultSelector": {
+        "backup_job_id.$": "$.BackupJobId"
+      },
+      "ResultPath": "$.backup_job_output",
+      "Next": "WaitBackupJobCompletion",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.HeartbeatTimeout",
+            "States.Permissions"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed",
+            "States.Runtime"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "BackupFailure"
+        }
+      ]
+    },
+    "LinuxLevel1Backup": {
+      "Comment": "This step will trigger linux level 1 backup",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:backup:startBackupJob",
+      "Parameters": {
+        "BackupVaultName.$": "$.vault_name",
+        "IamRoleArn.$": "States.Format('arn:aws:iam::{}:role/EC2LinuxLevel1NativeBackup-{}',$.account_id,$.region)",
+        "ResourceArn.$": "States.Format('arn:aws:ec2:{}:{}:instance/{}',$.region,$.account_id,$.instance_id)",
+        "Lifecycle.$": "$.retention_period"
+      },
+      "ResultSelector": {
+        "backup_job_id.$": "$.BackupJobId"
+      },
+      "ResultPath": "$.backup_job_output",
+      "Next": "WaitBackupJobCompletion",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.HeartbeatTimeout",
+            "States.Permissions"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed",
+            "States.Runtime"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "BackupFailure"
+        }
+      ]
+    },
+    "WaitBackupJobCompletion": {
+      "Type": "Wait",
+      "Seconds": 300,
+      "Next": "DescribeBackupJob"
+    },
+    "DescribeBackupJob": {
+      "Comment": "This step will check the current status of backup job.",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:backup:describeBackupJob",
+      "Parameters": {
+        "BackupJobId.$": "$.backup_job_output.backup_job_id"
+      },
+      "ResultSelector": {
+        "backup_job_id.$": "$.BackupJobId",
+        "state.$": "$.State",
+        "backup_vault_name.$": "$.BackupVaultName",
+        "recovery_point_arn.$": "$.RecoveryPointArn"
+      },
+      "ResultPath": "$.backup_job_output",
+      "Next": "CheckBackupJobStatus",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.HeartbeatTimeout",
+            "States.Permissions"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed",
+            "States.Runtime"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "BackupFailure"
+        }
+      ]
+    },
+    "CheckBackupJobStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Or": [
+            {
+              "Variable": "$.backup_job_output.state",
+              "StringEquals": "CREATED"
+            },
+            {
+              "Variable": "$.backup_job_output.state",
+              "StringEquals": "RUNNING"
+            },
+            {
+              "Or": [
+                {
+                  "Variable": "$.backup_job_output.state",
+                  "StringEquals": "PENDING"
+                }
+              ]
+            }
+          ],
+          "Next": "WaitBackupJobCompletion"
+        },
+        {
+          "Variable": "$.backup_job_output.state",
+          "StringEquals": "COMPLETED",
+          "Next": "CheckRecoveryPointStatus"
+        }
+      ],
+      "Default": "BackupFailure"
+    },
+    "BackupFailure": {
+      "Type": "Pass",
+      "Parameters": {
+        "sh_result.$": "$",
+        "backup_validation": false
+      },
+      "Next": "DynamodbLogging"
+    },
+    "LinuxLevel2Backup": {
+      "Comment": "This step will trigger a step function which takes linux level 2 backup",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::states:startExecution.sync:2",
+      "Parameters": {
+        "Input": {
+          "Instance_id.$": "States.Array($.instance_id)",
+          "Account_id.$": "$.account_id",
+          "region.$": "$.region",
+          "retention_period.$": "$.retention_period"
+        },
+        "StateMachineArn.$": "States.Format('arn:aws:states:{}:{}:stateMachine:dxcms_Linux_Level2_Backup',$.region,$.account_id)"
+      },
+      "ResultSelector": {
+        "execution_arn.$": "$.ExecutionArn"
+      },
+      "ResultPath": "$.sfn_call_response",
+      "Next": "ReadLinuxLevel2Output",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.HeartbeatTimeout",
+            "States.Permissions"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed",
+            "States.Runtime"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "BackupFailure"
+        }
+      ]
+    },
+    "ReadLinuxLevel2Output": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${ReadLinuxLevel2Output}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "ReadLinuxLevel2OutputError"
+        }
+      ],
+      "Next": "CheckSfnStatus"
+    },
+    "ReadLinuxLevel2OutputError": {
+      "Type": "Pass",
+      "Parameters": {
+        "sh_result.$": "$",
+        "ExecutionId.$": "$$.Execution.Id",
+        "StateMachineName.$": "$$.StateMachine.Name",
+        "ErrorMessage": "ReadLinuxLevel2Output State Failed"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "CheckSfnStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.backup_sfn_validation",
+          "BooleanEquals": true,
+          "Next": "CheckRecoveryPointStatus"
+        },
+        {
+          "Variable": "$.backup_sfn_validation",
+          "BooleanEquals": false,
+          "Next": "BackupFailure"
+        }
+      ]
+    },
+    "CheckRecoveryPointStatus": {
+      "Comment": "This step will check the current status of recovery point.",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:backup:describeRecoveryPoint",
+      "Parameters": {
+        "BackupVaultName.$": "$.backup_job_output.backup_vault_name",
+        "RecoveryPointArn.$": "$.backup_job_output.recovery_point_arn"
+      },
+      "ResultSelector": {
+        "recovery_point_status.$": "$.Status",
+        "creation_date.$": "$.CreationDate"
+      },
+      "ResultPath": "$.recovery_point_output",
+      "Next": "ChoiceRecoveryPointCompletion",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.HeartbeatTimeout",
+            "States.Permissions"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed",
+            "States.Runtime"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "BackupFailure"
+        }
+      ]
+    },
+    "ChoiceRecoveryPointCompletion": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.recovery_point_output.recovery_point_status",
+          "StringEquals": "COMPLETED",
+          "Next": "DynamodbLogging"
+        }
+      ],
+      "Default": "BackupFailure"
+    },
+    "DynamodbLogging": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${DynamodbLogging}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token",
+          "Execution.$": "$$.Execution.Id",
+          "StateMachine.$": "$$.StateMachine.Name"
+        }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "DynamodbLoggingError"
+        }
+      ],
+      "Next": "SendEmail"
+    },
+    "DynamodbLoggingError": {
+      "Type": "Pass",
+      "Parameters": {
+        "sh_result.$": "$",
+        "ExecutionId.$": "$$.Execution.Id",
+        "StateMachineName.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "DynamodbLogging Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "SendEmail": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${SendEmail}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "SendEmailError"
+        }
+      ],
+      "Next": "SnowDescriptionInput"
+    },
+    "SendEmailError": {
+      "Type": "Pass",
+      "Parameters": {
+        "sh_result.$": "$",
+        "ExecutionId.$": "$$.Execution.Id",
+        "StateMachineName.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "SendEmail Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "SnowDescriptionInput": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${SnowDescriptionInput}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "SnowDescriptionInputError"
+        }
+      ],
+      "Next": "TriggerNotificationSFN"
+    },
+    "SnowDescriptionInputError": {
+      "Type": "Pass",
+      "Parameters": {
+        "sh_result.$": "$",
+        "ExecutionId.$": "$$.Execution.Id",
+        "StateMachineName.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "SnowDescriptionInput Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "TriggerNotificationSFN": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${TriggerNotificationSFN}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "TriggerNotificationSFNError"
+        }
+      ],
+      "End": true
+    },
+    "TriggerNotificationSFNError": {
+      "Type": "Pass",
+      "Parameters": {
+        "sh_result.$": "$",
+        "ExecutionId.$": "$$.Execution.Id",
+        "StateMachineName.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "TriggerNotificationSFN Function"
+      },
+      "Next": "TriggerNotificationSfnWError"
+    },
+    "TriggerNotificationSfnWError": {
+      "Comment": "This step will trigger notification sfn if states caught an error",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${TriggerNotificationSfnWError}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "ResultPath": "$.errorInfo",
+          "Next": "TriggerNotificationSfnWErrorError"
+        }
+      ],
+      "Next": "NotifyForLambdaFunctionFailure"
+    },
+    "TriggerNotificationSfnWErrorError": {
+      "Type": "Pass",
+      "Parameters": {
+        "sh_result.$": "$",
+        "ExecutionId.$": "$$.Execution.Id",
+        "StateMachineName.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "TriggerNotificationSfnWError Function"
+      },
+      "Next": "NotifyForLambdaFunctionFailure"
+    },
+    "NotifyForLambdaFunctionFailure": {
+      "Type": "Task",
+      "Resource": "${NotifyForLambdaFunctionFailure}",
+      "TimeoutSeconds": 900,
+      "End": true
+    }
+  }
+}

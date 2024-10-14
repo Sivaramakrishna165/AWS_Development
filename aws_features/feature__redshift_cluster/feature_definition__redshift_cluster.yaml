@@ -1,0 +1,303 @@
+---
+# Feature Definition (FD) for RedshiftCluster
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: RedshiftCluster
+Version: '10.0.0.2'
+StandardCreationBatch: 4
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creation of Redshift Cluster.
+
+RedshiftClusterParameters:
+  ClusterName:
+    Description: Name of the Redshift cluster
+    Type: String
+    Default: 'redshiftcluster-1'
+
+  ClusterVersion:
+    Description: Redshift cluster version.
+    Type: String
+    Default: "1.0"
+
+  ClusterParameterGroupName:
+    Description: Name of the parameter group to be associated with this cluster.
+    Type: String
+    Default: ''
+  
+  DBName:
+    Description: The name of the first database to be created when the cluster is created.
+    Type: String
+    Default: "dev"
+  
+  Encryption:
+    Description: Redshift cluster Encryption.
+    Type: String
+    Default: "true"
+    AllowedValues: ["true","false"]
+  
+  KmsKeyId:
+    Description: KMS key ID of the encryption key that you want to use to encrypt data in the cluster.
+    Type: String
+    Default: ""
+
+  DBMasterUserName:
+    Description: The user name associated with the admin user account for the cluster.
+    Type: String
+    Default: "master"
+  
+  DBMasterUserPassword:
+    Description: 'The master password for the DB instance.'
+    Type: String
+    NoEcho: true
+    Default: 'Temppassword1'
+  
+  NodeType:
+    Description: 'The node type to be provisioned for the cluster.'
+    Type: String
+    Default: 'dc2.large'
+    AllowedValues: ['dc2.large', 'dc2.8xlarge', 'ra3.xlplus', 'ra3.4xlarge', 'ra3.16xlarge']
+
+  ClassicResize:
+    Description: Type of the resize operation.(if this set to true it will follow classic resize otherwise follows elastic resize)
+    Type: String
+    Default: "false"
+    AllowedValues: ["true","false"]
+  
+  ClusterType:
+    Description: 'The type of the cluster.'
+    Type: String
+    Default: "multi-node"
+    AllowedValues: ["multi-node","single-node"]
+
+  NumberOfNode:
+    Description: The number of compute nodes in the cluster(It should be always greater than 1 if cluster type is 'multi-node'). 
+    Default: 2
+    Type: Number
+  
+  PreferredMaintenanceWindow:
+    Description: The weekly time range (in UTC) during which system maintenance can occur.
+    Type: String
+    Default: 'sat:07:00-sat:07:30'
+
+  RedshiftRelocation:
+    Description: relocation for an Amazon Redshift cluster between Availability Zones (Applicable only for the 'ra3' node type).
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true','false']
+  
+  VpcId:
+    #Type: "AWS::EC2::VPC::Id"
+    Type: String
+    Description: The VPC of the worker instances
+    Default: ""
+
+  Subnets:
+    #Type: "List<AWS::EC2::Subnet::Id>"
+    Type: String
+    Default: "dummy"
+    Description: The subnets where workers can be created.  
+  
+  SecurityGroup:
+    Type: String
+    Default: ""
+    Description: The source security group for the Cluster(If not provided it will pick default security group).
+  
+  EventSubscriptionSeverity:
+    Default: "ERROR"
+    Type: String
+    AllowedValues: ["INFO", "ERROR"]
+    Description: Redshift event severity to be published by the event notification subscription.
+  
+  AutomatedBackupRetention:
+    Description: Automated backup retention period it should be between 1-35.
+    Type: Number
+    Default: 0
+    MinValue: 1
+    MaxValue: 35
+
+  PriorityIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priroity fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+
+  RedshiftAuditLogBucket:
+    Default: /DXC/RedshiftAuditLogBucket
+    Description: SSM Param that store Redshift audit log bucket name
+    Type: "AWS::SSM::Parameter::Value<String>" 
+  
+  NotifyEmail:
+    Default: /DXC/Notification/DXCNotifyEmail
+    Description: SSM Param that store Notify email
+    Type: "AWS::SSM::Parameter::Value<String>"
+  
+  EnableAuditLog:
+    Default: 'true'
+    Type: String
+    Description: Set to true, for exporting redshift audit logs to s3
+    AllowedValues: ['true', 'false']
+  
+
+Alarms:
+  RedshiftCPUUtilizationAlarm:
+    ApplyCPUUtilizationAlarm:
+      Description: 'Enable for creating CPU Utilisation Alarm. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities is deployed.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    CPUUtilizationPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 300
+    CPUUtilizationStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    CPUUtilizationThreshold:
+      Description: 'The value to compare with the specified statistic.'
+      Type: Number
+      Default: 80
+      MinValue: 1
+      MaxValue: 100
+    CPUUtilizationEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 2
+    CPUUtilizationComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'GreaterThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  RedshiftReadLatencyAlarm:
+    ApplyReadLatencyAlarm:
+      Description: 'Enable for creating Read Latency Alarm.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    ReadLatencyPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 300
+    ReadLatencyStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    ReadLatencyThreshold:
+      Description: 'Threshold for the ReadLatency'
+      Type: Number
+      Default: '0.05'
+    ReadLatencyEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 2
+    ReadLatencyComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'GreaterThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  RedshiftWriteLatencyAlarm:
+    ApplyWriteLatencyAlarm:
+      Description: 'Enable for creating Write Latency Alarm.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    WriteLatencyPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 300
+    WriteLatencyStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    WriteLatencyThreshold:
+      Description: 'Threshold for the WriteLatency.'
+      Type: Number
+      Default: '0.05'
+    WriteLatencyEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 2
+    WriteLatencyComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'GreaterThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  RedshiftPercentageDiskSpaceUsedAlarm:
+    ApplyPercentageDiskSpaceUsedAlarm:
+      Description: 'Enable for creating Read Latency Alarm.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    PercentageDiskSpaceUsedPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 300
+    PercentageDiskSpaceUsedStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Average'
+    PercentageDiskSpaceUsedThreshold:
+      Description: 'Threshold for the PercentageDiskSpaceUsed'
+      Type: Number
+      Default: '80'
+    PercentageDiskSpaceUsedEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 2
+    PercentageDiskSpaceUsedComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'GreaterThanThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  RedshiftHealthStatusAlarm:
+    ApplyHealthStatusAlarm:
+      Description: 'Enable for creating Read Latency Alarm.'
+      Type: String
+      AllowedValues: ['true', 'false']
+      Default: 'true'
+    HealthStatusPeriod:
+      Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+      Type: Number
+      Default: 300
+    HealthStatusStatistic:
+      Description: 'The statistic for the metric associated with the alarm'
+      Type: String
+      AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+      Default: 'Minimum'
+    HealthStatusThreshold:
+      Description: 'Threshold for the HealthStatus'
+      Type: Number
+      Default: '0'
+    HealthStatusEvaluationPeriods:
+      Description: 'The number of periods over which data is compared to the specified threshold.'
+      Type: Number
+      Default: 2
+    HealthStatusComparisonOperator:
+      Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+      Type: String
+      Default: 'LessThanOrEqualToThreshold'
+      AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+    
+    
+AllowDisable: true
+ResourceDeployment:
+  - RedshiftCluster.yaml
+DepensOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities
+

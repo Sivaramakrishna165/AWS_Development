@@ -1,0 +1,31 @@
+---
+# Feature Definition (FD) for security_group_compliance
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: SecurityGroupCompliance
+Version: '8.0.0.2'
+StandardCreationBatch: 3
+EnableFeature: true
+Standards:
+  - Gold
+# No "Customers" therefore available to all
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creates required resoures for aws config custom resource for security groups
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - securityGroupCompliance.yaml

@@ -1,0 +1,405 @@
+{
+    "Comment": "This State Machine will perform the patch scan on the scheduled instances.",
+    "StartAt": "Parallel",
+    "States": {
+        "Parallel": {
+            "Type": "Parallel",
+            "Next": "SFN_output_processing",
+            "Branches": [
+                {
+                    "StartAt": "check_patch_phase",
+                    "States": {
+                        "check_patch_phase": {
+                            "Type": "Choice",
+                            "Choices": [
+                                {
+                                    "Variable": "$.Patch_Phase",
+                                    "StringEquals": "pre-patch",
+                                    "Next": "start_stopped_state_instances"
+                                },
+                                {
+                                    "Variable": "$.Patch_Phase",
+                                    "StringEquals": "post-patch",
+                                    "Next": "ssm_agent_validation"
+                                }
+                            ]
+                        },
+                        "start_stopped_state_instances": {
+                            "Type": "Task",
+                            "Resource": "${start_stopped_state_instances}",
+                            "Retry": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "IntervalSeconds": 3,
+                                    "BackoffRate": 2,
+                                    "MaxAttempts": 20
+                                }
+                            ],
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.DataLimitExceeded",
+                                        "States.Runtime",
+                                        "States.TaskFailed",
+                                        "States.Permissions",
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "Next": "start_stopped_state_instances_error"
+                                }
+                            ],
+                            "Next": "Wait"
+                        },
+                        "start_stopped_state_instances_error": {
+                            "Type": "Pass",
+                            "Parameters": {
+                                "Cause.$": "$.Cause",
+                                "State.$": "$$.State",
+                                "ErrorMessageFrom": "start_stopped_state_instances Function"
+                            },
+                            "End": true
+                        },
+                        "Wait": {
+                            "Type": "Wait",
+                            "Seconds": 900,
+                            "Next": "ssm_agent_validation"
+                        },
+                        "ssm_agent_validation": {
+                            "Type": "Task",
+                            "Resource": "${ssm_agent_validation}",
+                            "Retry": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "IntervalSeconds": 3,
+                                    "BackoffRate": 2,
+                                    "MaxAttempts": 20
+                                }
+                            ],
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.DataLimitExceeded",
+                                        "States.Runtime",
+                                        "States.TaskFailed",
+                                        "States.Permissions",
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "Next": "ssm_agent_validation_error"
+                                }
+                            ],
+                            "Next": "execute_patch_scan"
+                        },
+                        "ssm_agent_validation_error": {
+                            "Type": "Pass",
+                            "Parameters": {
+                                "Cause.$": "$.Cause",
+                                "State.$": "$$.State",
+                                "ErrorMessageFrom": "ssm_agent_validation Function"
+                            },
+                            "End": true
+                        },
+                        "execute_patch_scan": {
+                            "Type": "Task",
+                            "Resource": "${execute_patch_scan}",
+                            "Retry": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "IntervalSeconds": 3,
+                                    "BackoffRate": 2,
+                                    "MaxAttempts": 20
+                                }
+                            ],
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.DataLimitExceeded",
+                                        "States.Runtime",
+                                        "States.TaskFailed",
+                                        "States.Permissions",
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "Next": "execute_patch_scan_error"
+                                }
+                            ],
+                            "Next": "generate_unique_time_for_cmd_status_SFN"
+                        },
+                        "execute_patch_scan_error": {
+                            "Type": "Pass",
+                            "Parameters": {
+                                "Cause.$": "$.Cause",
+                                "State.$": "$$.State",
+                                "ErrorMessageFrom": "execute_patch_scan Function"
+                            },
+                            "End": true
+                        },
+                        "generate_unique_time_for_cmd_status_SFN": {
+                            "Type": "Task",
+                            "Resource": "${generate_unique_time_for_cmd_status_SFN}",
+                            "Retry": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "IntervalSeconds": 3,
+                                    "BackoffRate": 2,
+                                    "MaxAttempts": 3
+                                }
+                            ],
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.DataLimitExceeded",
+                                        "States.Runtime",
+                                        "States.TaskFailed",
+                                        "States.Permissions",
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "Next": "generate_unique_time_for_cmd_status_SFN_error"
+                                }
+                            ],
+                            "Next": "Call_check_cmd_status_SFN"
+                        },
+                        "generate_unique_time_for_cmd_status_SFN_error": {
+                            "Type": "Pass",
+                            "Parameters": {
+                                "Cause.$": "$.Cause",
+                                "State.$": "$$.State",
+                                "ErrorMessageFrom": "generate_unique_time_for_cmd_status_SFN Function"
+                            },
+                            "End": true
+                        },
+                        "Call_check_cmd_status_SFN": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::states:startExecution.sync:2",
+                            "Parameters": {
+                                "StateMachineArn": "${Call_check_cmd_status_SFN}",
+                                "Name.$": "$.SubSFName",
+                                "Input": {
+                                    "Patching_Type.$": "$.Patching_Type",
+                                    "PatchInstallOn.$": "$.PatchInstallOn",
+                                    "CommandId.$": "$.CommandId",
+                                    "Status.$": "$.Status",
+                                    "Count.$": "$.Count",
+                                    "WaitSeconds.$": "$.WaitSeconds",
+                                    "S3_Bucket.$": "$.S3_Bucket",
+                                    "S3_directory_name.$": "$.S3_directory_name",
+                                    "app_action.$": "$.app_action",
+                                    "S3_Folder_Name.$": "$.S3_Folder_Name",
+                                    "region.$": "$.region",
+                                    "Patch_Phase.$": "$.Patch_Phase"
+                                }
+                            },
+                            "Retry": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "IntervalSeconds": 3,
+                                    "BackoffRate": 2,
+                                    "MaxAttempts": 3
+                                }
+                            ],
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.DataLimitExceeded",
+                                        "States.Runtime",
+                                        "States.TaskFailed",
+                                        "States.Permissions",
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "Next": "Call_SFN_to_Stop_Apps_error"
+                                }
+                            ],
+                            "ResultPath": "$.Output",
+                            "Next": "generate_PatchScan_Report"
+                        },
+                        "Call_SFN_to_Stop_Apps_error": {
+                            "Type": "Pass",
+                            "Parameters": {
+                                "Cause.$": "$.Cause",
+                                "State.$": "$$.State",
+                                "ErrorMessageFrom": "Call_SFN_to_Stop_Apps SFN"
+                            },
+                            "End": true
+                        },
+                        "generate_PatchScan_Report": {
+                            "Type": "Task",
+                            "Resource": "${generate_PatchScan_Report}",
+                            "TimeoutSeconds": 300,
+                            "Retry": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "IntervalSeconds": 3,
+                                    "BackoffRate": 2,
+                                    "MaxAttempts": 10
+                                }
+                            ],
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.DataLimitExceeded",
+                                        "States.Runtime",
+                                        "States.TaskFailed",
+                                        "States.Permissions",
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "Next": "generate_PatchScan_Report_error"
+                                }
+                            ],
+                            "Next": "check_phase"
+                        },
+                        "generate_PatchScan_Report_error": {
+                            "Type": "Pass",
+                            "Parameters": {
+                                "Cause.$": "$.Cause",
+                                "State.$": "$$.State",
+                                "ErrorMessageFrom": "generate_PatchScan_Report Function"
+                            },
+                            "End": true
+                        },
+                        "check_phase": {
+                            "Type": "Choice",
+                            "Choices": [
+                                {
+                                    "Variable": "$.Patch_Phase",
+                                    "StringEquals": "pre-patch",
+                                    "Next": "Wait_for_sending_email"
+                                },
+                                {
+                                    "Variable": "$.Patch_Phase",
+                                    "StringEquals": "post-patch",
+                                    "Next": "End_state"
+                                }
+                            ]
+                        },
+                        "Wait_for_sending_email": {
+                            "Type": "Wait",
+                            "Seconds": 30,
+                            "Next": "send_pre_patch_scan_report_mail"
+                        },
+                        "send_pre_patch_scan_report_mail": {
+                            "Type": "Task",
+                            "Resource": "${send_pre_patch_scan_report_mail}",
+                            "TimeoutSeconds": 300,
+                            "Retry": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "IntervalSeconds": 3,
+                                    "BackoffRate": 2,
+                                    "MaxAttempts": 3
+                                }
+                            ],
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.DataLimitExceeded",
+                                        "States.Runtime",
+                                        "States.TaskFailed",
+                                        "States.Permissions",
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "Next": "send_pre_patch_scan_report_mail_error"
+                                }
+                            ],
+                            "Next": "stop_stopped_state_instances"
+                        },
+                        "send_pre_patch_scan_report_mail_error": {
+                            "Type": "Pass",
+                            "Parameters": {
+                                "Cause.$": "$.Cause",
+                                "State.$": "$$.State",
+                                "ErrorMessageFrom": "send_pre_patch_scan_report_mail"
+                            },
+                            "End": true
+                        },
+                        "stop_stopped_state_instances": {
+                            "Type": "Task",
+                            "Resource": "${stop_stopped_state_instances}",
+                            "Retry": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "IntervalSeconds": 3,
+                                    "BackoffRate": 2,
+                                    "MaxAttempts": 20
+                                }
+                            ],
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.DataLimitExceeded",
+                                        "States.Runtime",
+                                        "States.TaskFailed",
+                                        "States.Permissions",
+                                        "States.Timeout",
+                                        "Lambda.Unknown"
+                                    ],
+                                    "Next": "stop_stopped_state_instances_error"
+                                }
+                            ],
+                            "End": true
+                        },
+                        "stop_stopped_state_instances_error": {
+                            "Type": "Pass",
+                            "Parameters": {
+                                "Cause.$": "$.Cause",
+                                "State.$": "$$.State",
+                                "ErrorMessageFrom": "start_stopped_state_instances Function"
+                            },
+                            "End": true
+                        },
+                        "End_state": {
+                            "Type": "Pass",
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "Pass",
+                    "States": {
+                        "Pass": {
+                            "Type": "Pass",
+                            "Parameters": {
+                                "Input.$": "$",
+                                "Execution.$": "$$.Execution.Id",
+                                "StateMachine.$": "$$.StateMachine"
+                            },
+                            "End": true
+                        }
+                    }
+                }
+            ]
+        },
+        "SFN_output_processing": {
+            "Type": "Task",
+            "Resource": "${SFN_output_processing}",
+            "End": true
+        }
+    }
+}

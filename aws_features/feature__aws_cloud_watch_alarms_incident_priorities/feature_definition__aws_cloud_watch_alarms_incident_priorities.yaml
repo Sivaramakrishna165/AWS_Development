@@ -1,0 +1,43 @@
+---
+# Feature Definition (FD) for AWSCloudWatchAlarmsIncidentPriorities
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AWSCloudWatchAlarmsIncidentPriorities
+Version: '10.0.0.4'
+StandardCreationBatch: 2
+EnableFeature: true
+Standards:
+  - Gold
+FeatureParams:
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+  pCWAlarmIncidentTopicDefault:
+    Description: '[Do Not change] Default SNS Topic for creating priority based Incidents'
+    Default: 'DXCMS-CW-Alarms-Create-Incidents'
+    Type: String
+  pCWAlarmIncidentTopicP1:
+    Description: '[Do Not change] SNS Topic for creating priority based Incidents with Priority P1'
+    Default: 'DXCMS-CW-Alarms-Create-Incidents-P1'
+    Type: String
+  pCWAlarmIncidentTopicP2:
+    Description: '[Do Not change] SNS Topic for creating priority based Incidents with Priority P2'
+    Default: 'DXCMS-CW-Alarms-Create-Incidents-P2'
+    Type: String
+  pCWAlarmIncidentTopicP3:
+    Description: '[Do Not change] SNS Topic for creating priority based Incidents with Priority P3'
+    Default: 'DXCMS-CW-Alarms-Create-Incidents-P3'
+    Type: String
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: AWS CloudWatch alarms Priorities will be set based on the Alarms thresholds
+AllowDisable: true
+ResourceDeployment:
+  - aws_cw_alarms_priorities.yaml
+DepensOnFeature:
+  - CommonServicenow

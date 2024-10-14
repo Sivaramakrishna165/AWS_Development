@@ -1,0 +1,1011 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: DXC Managed Services - Elastic Disaster Recovery
+
+Parameters:
+
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/ElasticDisasterRecovery/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+
+  pPlatformVersion:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Main/pPlatformVersion
+    Description: "[DO NOT CHANGE] SSM Parameter for platform version"
+
+  pSESLayerArn:
+    Type : 'AWS::SSM::Parameter::Value<String>'
+    Default: /DXC/SES/SESLayerLambdaArn
+    Description: "SSM parameter for Lambda Layer ARN"
+
+  pTracingFlag:    
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/CloudWatch/TracingFlag"
+    Description: "Flag to enable AWS X-Ray tracing (set to Active) for debugging. Default setting is PassThrough."
+
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+
+  pEDRInstanceInfoTable:    
+    Type: String
+    Default: "FtEDRInstanceInfoTable"
+    Description: "EDR Instance info table contains information required for the disaster recovery"
+
+  pEDRRegionInfoTable:    
+    Type: String
+    Default: "FtEDRRegionInfoTable"
+    Description: "EDR Region info table contains information required for the disaster recovery"    
+
+  pEDRPrimaryVendedStepFunctionLogGroup:
+    Description: EDR Primary Step Function CloudWatch Log Group
+    Default: /aws/vendedlogs/stepfunction/EDRPrimaryStepFunction
+    Type: String   
+
+  pRecoveryregionDeployment:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: "To deploy the Primary/Recovery resources in the respective regions. If true, then the recovery region resources will be deployed. If false, then primary region resources will be deployed"
+
+  pPrimaryRegionName:
+    Type: String
+    Default: ""
+    Description: "Provide the primary region name where the primary instance resides"
+
+  pRecoveryRegionName:
+    Type: String
+    Default: ""
+    Description: "Provide the recovery region name where the recovery instance resides"
+
+  pNotifyEmail:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Notification/DXCNotifyEmail
+    Description: "Email address for getting Notifications on EDR replication setup"
+
+  pReplicationVpcCidr:
+    Type: String
+    Default: "10.3.0.0/16"
+    Description: "Replication server vpc cidr"
+
+  pReplicationSubnetCidr:
+    Type: String
+    Default: "10.3.1.0/24"
+    Description: "Replication server subnet cidr"                
+
+########## Conditions ##########
+
+Conditions:
+  cSourceRecoveryRegions: !And [!Not [!Equals [!Ref pPrimaryRegionName, ""]], !Not [!Equals [!Ref pRecoveryRegionName, ""]]]
+  cRecoveryregion:  !And [!Condition cSourceRecoveryRegions, !Equals [!Ref pRecoveryregionDeployment, "true"]]
+  cPrimaryRegion: !And [!Condition cSourceRecoveryRegions, !Equals [!Ref pRecoveryregionDeployment, "false"]]
+
+Resources:
+
+## Notify the status through email
+  rEDRNotifyTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: !Ref pNotifyEmail
+          Protocol: email
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+      - Key: Name
+        Value: !Sub rEDRNotifyTopic
+      - Key: Owner
+        Value: DXC
+
+##########Creating the Primary Region resources##########
+
+  rEDRPrimaryVendedStepFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: cPrimaryRegion  
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Ref pEDRPrimaryVendedStepFunctionLogGroup          
+
+## Processor Lambda       
+  rEDRProcessorLambdaRole:
+    Type: "AWS::IAM::Role"
+    Condition: cPrimaryRegion    
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "EDRProcessorLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "states:StartExecution"
+                Resource:
+                  - !Ref rEDRPrimaryStepFunction
+              - Effect: "Allow"
+                Action:
+                  - "ec2:CreateTags"
+                  - "ec2:DescribeInstances"
+                  - "ec2:DescribeInstanceStatus"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "ssm:DescribeInstanceInformation"
+                Resource: "*"                                                
+
+  rEDRLambdaProcessor:
+    Type: "AWS::Lambda::Function"
+    Condition: cPrimaryRegion     
+    Properties:
+      FunctionName: 'dxc-awsms-edr-lambda-processor'
+      Description: "Elastic Disaster Recovery - lambda processor"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/edr_lambda_processor.zip"
+      Environment: 
+        Variables: 
+          EDRInstanceInfoTable: !Ref pEDRInstanceInfoTable
+          PrimaryRegionName: !Ref pPrimaryRegionName
+          RecoveryRegionName: !Ref pRecoveryRegionName
+          StateFunArn: !GetAtt rEDRPrimaryStepFunction.Arn
+      Handler: "dxc_edr_lambda_processor.lambda_handler"
+      Runtime: python3.11
+      Layers:
+        - !Ref pSESLayerArn      
+      Timeout: 900
+      MemorySize: 128
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rEDRProcessorLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "Elastic Disaster Recovery Lambda processor"
+        -
+          Key: "Owner"
+          Value: "DXC"           
+          
+## Install Replication Agent - Lambda      
+  rEDRInstallReplagentLambdaRole:
+    Type: "AWS::IAM::Role"
+    Condition: cPrimaryRegion     
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "EDRInstallReplagentLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "ssm:SendCommand"
+                  - "ssm:DescribeInstanceInformation"
+                  - "ssm:GetParameters"
+                  - "ssm:GetCommandInvocation"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "ec2:CreateTags"
+                Resource: "*"                               
+
+  rEDRInstallReplagentLambda:
+    Type: "AWS::Lambda::Function"
+    Condition: cPrimaryRegion     
+    Properties:
+      FunctionName: 'dxc-awsms-edr-sm1-install-replication-agent'
+      Description: "Elastic Disaster Recovery - Install Replication agent"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm1_edr_install_replication_agent.zip"
+      Environment: 
+        Variables: 
+          EDRInstanceInfoTable: !Ref pEDRInstanceInfoTable                  
+      Handler: "dxc_edr_sm1_install_replication_agent.lambda_handler"
+      Runtime: python3.11
+      Layers:
+        - !Ref pSESLayerArn      
+      Timeout: 900
+      MemorySize: 128
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rEDRInstallReplagentLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "Elastic Disaster Recovery - To Install Replication Agent"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+## Update Replication Launch Template - Lambda  
+  rEDRUpdateReplicationLaunchTempLambdaRole:
+    Type: "AWS::IAM::Role"    
+    Condition: cPrimaryRegion     
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "EDRUpdateReplicationLaunchTempLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "drs:DescribeSourceServers"
+                  - "drs:UpdateLaunchConfiguration"
+                  - "drs:GetLaunchConfiguration"
+                  - "drs:UpdateReplicationConfiguration"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "ssm:GetParameter"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "ec2:CreateTags"
+                  - "ec2:DescribeLaunchTemplates"
+                  - "ec2:CreateLaunchTemplateVersion"
+                  - "ec2:ModifyLaunchTemplate"
+                  - "ec2:DescribeLaunchTemplateVersions"
+                  - "ec2:GetEbsEncryptionByDefault"
+                  - "ec2:DescribeSecurityGroups"
+                  - "ec2:CreateSecurityGroup"
+                  - "ec2:GetEbsDefaultKmsKeyId"
+                  - "ec2:DescribeSubnets"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "kms:DescribeKey"
+                  - "kms:CreateGrant"
+                Resource: "*"                                                   
+
+  rEDRUpdateReplicationLaunchTempLambda:
+    Type: "AWS::Lambda::Function"
+    Condition: cPrimaryRegion    
+    Properties:
+      FunctionName: 'dxc-awsms-edr-sm2-update-replication-launch-template'
+      Description: "Elastic Disaster Recovery - Update Replication config and Launch Template"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm2_edr_update_replication_launch_template.zip"
+      Environment: 
+        Variables: 
+          EDRInstanceInfoTable: !Ref pEDRInstanceInfoTable                 
+      Handler: "dxc_edr_sm2_update_replication_launch_template.lambda_handler"
+      Runtime: python3.11
+      Layers:
+        - !Ref pSESLayerArn      
+      Timeout: 900
+      MemorySize: 128
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rEDRUpdateReplicationLaunchTempLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "Elastic Disaster Recovery - To update the Replication config and Launch Template"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+## Update Instance Tags - Lambda
+  rEDRNotifyReplicationStatusLambdaRole:
+    Type: "AWS::IAM::Role"
+    Condition: cPrimaryRegion     
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "EDRNotifyReplicationStatusLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:GetItem"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "ec2:CreateTags"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "drs:DescribeSourceServers"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "sns:Publish"
+                Resource: !Ref rEDRNotifyTopic                                                             
+
+  rEDRNotifyReplicationStatusLambda:
+    Type: "AWS::Lambda::Function"
+    Condition: cPrimaryRegion     
+    Properties:
+      FunctionName: 'dxc-awsms-edr-sm3-notify-replication-status'
+      Description: "Elastic Disaster Recovery - Update Instance Tag"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sm3_edr_notify-replication-status.zip"
+      Environment: 
+        Variables: 
+          EDRInstanceInfoTable: !Ref pEDRInstanceInfoTable
+          NotifyEmailTopic: !Ref rEDRNotifyTopic
+          Stack_Region: !Sub '${AWS::Region}'
+          Execution_Account: !Sub '${AWS::AccountId}'          
+      Handler: "dxc_edr_sm3_notify_replication_status.lambda_handler"
+      Runtime: python3.11
+      Layers:
+        - !Ref pSESLayerArn      
+      Timeout: 900
+      MemorySize: 128
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rEDRNotifyReplicationStatusLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "Elastic Disaster Recovery - To notify the replication status"
+        -
+          Key: "Owner"
+          Value: "DXC"
+          
+## Event rule to detect the edr tag on the instances
+  rEDRTagInstanceTriggerRule:
+    Type: "AWS::Events::Rule"
+    Condition: cPrimaryRegion    
+    Properties:
+      Description: "Event that triggers lambda processor when the edr tag added to the EC2 instances"
+      EventPattern:
+        detail-type:
+          - "Tag Change on Resource"
+        source:
+          - "aws.tag"
+        detail:
+          changed-tag-keys:
+            - "edr"
+          service:
+            - "ec2"
+          resource-type:
+            - "instance"
+          tags:
+            edr:
+              - "True"
+              - "true"
+              - "TRUE"
+      Targets:
+        -
+          Arn: !GetAtt rEDRLambdaProcessor.Arn
+          Id: "EDRLambdaTriggerRule"
+
+## Processor Lambda Resource Based Policy - Event Rule
+  rEDRProcessorLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Condition: cPrimaryRegion    
+    Properties:
+      FunctionName:
+        Ref: "rEDRLambdaProcessor"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt rEDRTagInstanceTriggerRule.Arn
+      
+## EDR Primary Step function
+  rEDRPrimaryStepFunctionLambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Condition: cPrimaryRegion        
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - !Sub 'states.${AWS::Region}.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: EDRPrimaryStepFunctionLambdaExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                Resource: "*"
+
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogDelivery"
+                  - "logs:GetLogDelivery"
+                  - "logs:UpdateLogDelivery"
+                  - "logs:DeleteLogDelivery"
+                  - "logs:ListLogDeliveries"
+                  - "logs:PutResourcePolicy"
+                  - "logs:DescribeResourcePolicies"
+                  - "logs:DescribeLogGroups"
+                Resource: "*"
+
+  rEDRPrimaryStepFunction:
+    Type: "AWS::StepFunctions::StateMachine"
+    Condition: cPrimaryRegion    
+    DependsOn: "rEDRPrimaryStepFunctionLambdaExecutionRole"
+    Properties:
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/edr_primary_step_function/edr_primary_step_function.json'
+      DefinitionSubstitutions:
+        StateMachineInstallReplAgent: !GetAtt
+          - rEDRInstallReplagentLambda
+          - Arn
+        StateMachineUpdateReplicationLaunchTemplate: !GetAtt
+          - rEDRUpdateReplicationLaunchTempLambda
+          - Arn
+        StateMachineNotifyReplicationStatus: !GetAtt
+          - rEDRNotifyReplicationStatusLambda
+          - Arn                                          
+      RoleArn: !GetAtt rEDRPrimaryStepFunctionLambdaExecutionRole.Arn
+      LoggingConfiguration:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+             LogGroupArn: !GetAtt rEDRPrimaryVendedStepFunctionLogGroup.Arn
+        IncludeExecutionData: True
+        Level: ALL
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "EDR Primary Step Function"
+        -
+          Key: "Owner"
+          Value: "DXC"          
+          
+########## Creating the Recovery Region resources ##########
+
+## EDR Replication VPC
+  rEDRVpc1:
+    Type: AWS::EC2::VPC
+    Condition: cRecoveryregion
+    Properties:
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      CidrBlock: !Ref pReplicationVpcCidr
+      Tags:
+      - Key: Name
+        Value: EDR Replication VPC
+      - Key: Owner
+        Value: DXC 
+
+## EDR Replication Subnet
+  rEDRPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: cRecoveryregion
+    DependsOn: rEDRVpc1
+    Properties:
+      VpcId: !Ref rEDRVpc1
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Ref pReplicationSubnetCidr
+      Tags:
+      - Key: Name
+        Value: EDR Replication Private Subnet
+      - Key: Owner
+        Value: DXC
+
+## EDR Replication Route table
+  rEDRRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: cRecoveryregion
+    DependsOn: rEDRPrivateSubnet     
+    Properties:
+      VpcId: !Ref rEDRVpc1 
+      Tags: 
+      - Key: Name
+        Value: EDR Replication Route Table
+      - Key: Owner
+        Value: DXC
+
+## EDR Replication Subnet - Route table Association
+  rEDRRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: cRecoveryregion
+    DependsOn: rEDRRouteTable
+    Properties: 
+      RouteTableId: !Ref rEDRRouteTable
+      SubnetId: !Ref rEDRPrivateSubnet                        
+
+## EDR Replication Security Group
+  rEDRSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: cRecoveryregion    
+    DependsOn: rEDRVpc1
+    Properties:
+      GroupName: 'EDRSecurityGroup'
+      GroupDescription: security group for the replication servers
+      VpcId: !Ref rEDRVpc1
+      Tags:
+      - Key: Name
+        Value: EDR Replication Security Group
+      - Key: Owner
+        Value: DXC 
+      SecurityGroupEgress:
+        -
+          IpProtocol: "tcp"
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref pReplicationVpcCidr
+        -
+          IpProtocol: "udp"
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref pReplicationVpcCidr
+        -
+          IpProtocol: "tcp"
+          FromPort: 1500
+          ToPort: 1500
+          CidrIp: !Ref pReplicationVpcCidr
+      
+      SecurityGroupIngress:
+        -
+          IpProtocol: "tcp"
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref pReplicationVpcCidr
+        -
+          IpProtocol: "udp"
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref pReplicationVpcCidr
+        -
+          IpProtocol: "tcp"
+          FromPort: 1500
+          ToPort: 1500
+          CidrIp: !Ref pReplicationVpcCidr
+
+## EDR VPC Endpoints
+  rEDRDrsVpcInterfaceEndpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Condition: cRecoveryregion
+    Properties:
+      ServiceName: !Join [ ".", [ "com.amazonaws", !Ref "AWS::Region", "drs" ] ]
+      VpcEndpointType: Interface
+      VpcId: !Ref rEDRVpc1
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref rEDRPrivateSubnet
+      SecurityGroupIds:
+        - !Ref rEDRSecurityGroup
+
+  rEDREc2VpcInterfaceEndpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Condition: cRecoveryregion
+    Properties:
+      ServiceName: !Join [ ".", [ "com.amazonaws", !Ref "AWS::Region", "ec2" ] ]
+      VpcEndpointType: Interface
+      VpcId: !Ref rEDRVpc1
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref rEDRPrivateSubnet
+      SecurityGroupIds:
+        - !Ref rEDRSecurityGroup  
+
+  rEDRS3VpcGatewayEndpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Condition: cRecoveryregion
+    Properties:
+      ServiceName: !Join [ ".", [ "com.amazonaws", !Ref "AWS::Region", "s3" ] ]
+      VpcEndpointType: Gateway
+      VpcId: !Ref rEDRVpc1
+
+## EDR DynamodDB tables
+
+  rEDRInstanceInfoDdbTable:
+    Type: "AWS::DynamoDB::Table"
+    Condition: cRecoveryregion
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "InstanceId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "InstanceId"
+          KeyType: "HASH"
+
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: "Purpose"
+          Value: "Elastic Disaster Recovery - Instance Info Table"
+        - Key: Owner
+          Value: DXC           
+      TableName: !Ref pEDRInstanceInfoTable 
+
+  rEDRRegionInfoDdbTable:
+    Type: "AWS::DynamoDB::Table"
+    Condition: cRecoveryregion
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "PrimaryRegionName"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "PrimaryRegionName"
+          KeyType: "HASH"
+
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: "Purpose"
+          Value: "Elastic Disaster Recovery - Region Info Table"
+        - Key: Owner
+          Value: DXC           
+      TableName: !Ref pEDRRegionInfoTable
+
+## Recovery Region Setup Lambda
+  rEDRRecoveryRegionSetupLambdaRole:
+    Type: "AWS::IAM::Role"
+    Condition: cRecoveryregion
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "EDRRecoveryRegionSetupLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "iam:CreateInstanceProfile"
+                  - "iam:CreateRole"
+                  - "iam:AttachRolePolicy"
+                  - "iam:AddRoleToInstanceProfile"
+                  - "iam:PassRole"
+                  - "iam:GetRole"
+                  - "iam:GetInstanceProfile"
+                  - "iam:CreateServiceLinkedRole"                                                      
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "drs:*"
+                Resource: "*" 
+              - Effect: "Allow"
+                Action:
+                  - "ec2:*"
+                Resource: "*"                                                 
+
+  rEDRRecoveryRegionSetupLambda:
+    Type: "AWS::Lambda::Function"
+    Condition: cRecoveryregion    
+    Properties:
+      FunctionName: 'dxc-awsms-edr-recovery-region-setup'
+      Description: "Elastic Disaster Recovery - Recovery Region Setup lambda"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/edr_recovery_region_setup.zip"
+      Environment: 
+        Variables:
+          PrimaryRegionName: !Ref pPrimaryRegionName
+          RecoveryRegionName: !Ref pRecoveryRegionName
+          EDRRegionInfoTable: !Ref pEDRRegionInfoTable
+          EDRInstanceInfoTable: !Ref pEDRInstanceInfoTable
+          EDRVPC: !Ref rEDRVpc1
+          EDRSubnet: !Ref rEDRPrivateSubnet
+          EDRS3Endpoint: !Ref rEDRS3VpcGatewayEndpoint
+          EDRRouteTable: !Ref rEDRRouteTable
+          AccountId: !Sub '${AWS::AccountId}'
+          ReplicationVpcCidr: !Ref pReplicationVpcCidr
+          
+      Handler: "dxc_edr_recovery_region_setup.lambda_handler"
+      Runtime: python3.11
+      Layers:
+        - !Ref pSESLayerArn      
+      Timeout: 900
+      MemorySize: 128
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rEDRRecoveryRegionSetupLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "Elastic Disaster Recovery Recovery Region Setup lambda"
+        -
+          Key: "Owner"
+          Value: "DXC"
+
+## Initiate Recovery
+  rEDRInitiateRecoveryLambdaRole:
+    Type: "AWS::IAM::Role"
+    Condition: cRecoveryregion
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "EDRInitiateRecoveryLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:Scan"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "drs:StartRecovery"
+                  - "drs:ListTagsForResource"
+                  - "drs:CreateRecoveryInstanceForDrs"
+                  - "drs:TagResource"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "sns:Publish"
+                Resource: !Ref rEDRNotifyTopic
+              - Effect: "Allow"
+                Action:
+                  - "iam:PassRole"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:                
+                  - "ec2:AttachVolume"
+                  - "ec2:AuthorizeSecurityGroupIngress"
+                  - "ec2:DeleteSnapshot"
+                  - "ec2:DescribeInstances"
+                  - "ec2:DescribeInstanceAttribute"
+                  - "ec2:DescribeSnapshots"
+                  - "ec2:DeleteVolume"
+                  - "ec2:StartInstances"
+                  - "ec2:DescribeAvailabilityZones"
+                  - "ec2:RevokeSecurityGroupEgress"
+                  - "ec2:DescribeVolumes"
+                  - "ec2:CreateSnapshot"
+                  - "ec2:DescribeAccountAttributes"
+                  - "ec2:DeleteLaunchTemplateVersions"
+                  - "ec2:ModifyInstanceAttribute"
+                  - "ec2:DescribeInstanceStatus"
+                  - "ec2:DetachVolume"
+                  - "ec2:AuthorizeSecurityGroupEgress"
+                  - "ec2:TerminateInstances"
+                  - "ec2:DescribeLaunchTemplates"
+                  - "ec2:CreateTags"
+                  - "ec2:DescribeLaunchTemplateVersions"
+                  - "ec2:RunInstances"
+                  - "ec2:StopInstances"
+                  - "ec2:DescribeSecurityGroups"
+                  - "ec2:CreateLaunchTemplateVersion"
+                  - "ec2:CreateVolume"
+                  - "ec2:DescribeImages"
+                  - "ec2:CreateLaunchTemplate"
+                  - "ec2:DescribeInstanceTypes"
+                  - "ec2:ModifyLaunchTemplate"
+                  - "ec2:DescribeSubnets"
+                Resource: "*"                                                                 
+
+  rEDRInitiateRecoveryLambda:
+    Type: "AWS::Lambda::Function"
+    Condition: cRecoveryregion    
+    Properties:
+      FunctionName: 'dxc-awsms-edr-initiate-recovery'
+      Description: "Elastic Disaster Recovery - Initiate Recovery Instance"
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/edr_initiate_recovery.zip"
+      Environment: 
+        Variables: 
+          EDRInstanceInfoTable: !Ref pEDRInstanceInfoTable
+          EDRRegionInfoTable: !Ref pEDRRegionInfoTable
+          PrimaryRegionName: !Ref pPrimaryRegionName
+          RecoveryRegionName: !Ref pRecoveryRegionName
+          Stack_Region: !Sub '${AWS::Region}'
+          Execution_Account: !Sub '${AWS::AccountId}'
+          NotifyEmailTopic: !Ref rEDRNotifyTopic                    
+      Handler: "dxc_edr_initiate_recovery.lambda_handler"
+      Runtime: python3.11
+      Layers:
+        - !Ref pSESLayerArn      
+      Timeout: 900
+      MemorySize: 128
+      TracingConfig:
+        Mode: !Ref pTracingFlag
+      Role: !GetAtt rEDRInitiateRecoveryLambdaRole.Arn
+      Tags:
+        -
+          Key: "Purpose"
+          Value: "Elastic Disaster Recovery Lambda for initiating recovery instance"
+        -
+          Key: "Owner"
+          Value: "DXC"          
+
+## Event rule to detect disaster and trigger the recovery
+  rEDRHealthTriggerRule:
+    Type: AWS::Events::Rule
+    Condition: cRecoveryregion
+    Properties:
+      
+      Description: 'Event that Triggers the Recovery lambda to initiate recovery for the source instance'
+      EventPattern: {
+        "source": ["aws.health"],
+        "detail-type": ["AWS Health Event"],
+        "detail": {
+          "service": ["EC2"],
+          "eventTypeCategory": ["issue"],
+          "eventTypeCode": ["AWS_EC2_SPOT_API_UNAVAILABILITY", "AWS_EC2_VPC_API_ISSUE", "AWS_EC2_RI_API_ISSUE", "AWS_EC2_RUNINSTANCES_API_ISSUE", "AWS_EC2_INCREASED_LAUNCH_FAILURES", "AWS_EC2_DEDICATED_HOST_UNDER_RESERVATION_REPLACE", "AWS_EC2_INSTANCE_AUTO_RECOVERY_FAILURE", "AWS_EC2_DNS_RESOLUTION_ISSUE", "AWS_EC2_NETWORK_CONNECTIVITY_ISSUE", "AWS_EC2_POWER_CONNECTIVITY_ISSUE", "AWS_EC2_API_ISSUE", "AWS_EC2_OPERATIONAL_ISSUE", "AWS_EC2_RI_MARKETPLACE_BANK_ACCOUNT_UPDATE_REQUIRED", "AWS_EC2_INSTANCE_STORE_DRIVE_PERFORMANCE_DEGRADED"],
+          "statusCode": ["open"]
+        },
+        "region": [!Ref pPrimaryRegionName]
+      }
+      State: ENABLED
+      Targets:
+        -
+          Arn: !GetAtt rEDRInitiateRecoveryLambda.Arn
+          Id: "EDRRecoveryTrigger"
+
+## Recovery Lambda Resource Based Policy - Event Rule
+  rEDRRecoveryLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Condition: cRecoveryregion    
+    Properties:
+      FunctionName:
+        Ref: "rEDRInitiateRecoveryLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt rEDRHealthTriggerRule.Arn
+
+## Custom Lambda trigger
+  customInvokeLambda:
+    Type: Custom::RecoveryRegionSetupLambda
+    Condition: cRecoveryregion
+    DependsOn: rEDRRecoveryRegionSetupLambda
+    Properties:
+        ServiceToken: !GetAtt rEDRRecoveryRegionSetupLambda.Arn
+        pUpdateHash: !Ref pAutoUpdateHash

@@ -1,0 +1,308 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'A regional template which creates a CloudWatch event rule which calls a Lambda function to process AWS Health RISK events or all events and send a notification to ServiceNow'
+Parameters:
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/AWSHealthEvents/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pEnableAWSHealthRiskEvents:
+    Description: '[Required] Enable to get the AWS Health Risk events (can be modified if necessary)'
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  pRiskEventsPriority:
+    Description: '[Required] Default is set to P1 (can be modified if necessary)'
+    Type: String
+    Default: '1'
+    AllowedValues: ['1']
+  pEnableAWSHealthALLEvents:
+    Description: '[Required] Enable to get the ALL the AWS Health events (can be modified if necessary)'
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  pAllEventsPriority:
+    Description: '[Required] Default is set to P3 (can be modified if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3', '4', '5']
+  pServiceNowInputTopic:
+    Description: 'ssm parameter for servicenow sns topic' 
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/SES/Module/CommonServicenow/ComSnowStdInputArn"
+
+Conditions:
+
+  cIsEnableAllDisableRisk: !And
+    - !Equals [!Ref "pEnableAWSHealthALLEvents", "true"]
+    - !Equals [!Ref "pEnableAWSHealthRiskEvents", "false"]
+
+  cIsDisableAllEnableRisk: !And
+    - !Equals [!Ref "pEnableAWSHealthALLEvents", "false"]
+    - !Equals [!Ref "pEnableAWSHealthRiskEvents", "true"]
+
+  cIsDisableBothEvents: !And
+    - !Equals [!Ref "pEnableAWSHealthALLEvents", "false"]
+    - !Equals [!Ref "pEnableAWSHealthRiskEvents", "false"]
+
+  cIsEnableBothEvents: !And
+    - !Equals [!Ref "pEnableAWSHealthALLEvents", "true"]
+    - !Equals [!Ref "pEnableAWSHealthRiskEvents", "true"]
+
+  # If both RiskEvents and ALLEvents are ENABLED, then enable ONLY enable All Health Events
+  # This way we can ignore duplicate Incidents for RISK alerts
+  CreateEnableAWSHealtAllEvents: !Or
+    - !Condition cIsEnableBothEvents
+    - !Condition cIsEnableAllDisableRisk
+
+  # If both RiskEvents and ALLEvents are DISABLED, then it is mandate to enable the RISK Events rule
+  # This is as per Audit V4.2 requirement AWSPE-5468
+  CreateEnableAWSHealtRiskEvents: !Or
+    - !Condition cIsDisableBothEvents
+    - !Condition cIsDisableAllEnableRisk
+
+Resources:
+  rEventTriggerDxcmsHealthRiskEventsRule:
+    Condition: CreateEnableAWSHealtRiskEvents
+    Type: AWS::Events::Rule
+    Properties:
+      Description: 'When an AWS Health event of type RISK occurs, trigger a Lambda to notify ServiceNow'
+      EventPattern:
+        source:
+          - aws.health
+        detail-type:
+          - 'AWS Health Event'
+        detail:
+          service:
+            - RISK
+          eventTypeCategory:
+            - issue 
+      State: "ENABLED"
+      Targets:
+        -
+          Arn:
+            Fn::GetAtt:
+              - "rDxcmsHealthEventsLambda"
+              - "Arn"
+          Id: "TargetFunctionV1"
+
+  rDxcmsHealthRiskLambdaPermission:
+    Condition: CreateEnableAWSHealtRiskEvents
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: "rDxcmsHealthEventsLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "rEventTriggerDxcmsHealthRiskEventsRule"
+          - "Arn"
+
+# Event rule that will look for account specific AWS health events and triggers a lambda to create the SNOW incidents
+  rEventTriggerDxcmsHealthAccountSpecificEventsRule:
+    Condition: CreateEnableAWSHealtAllEvents
+    Type: AWS::Events::Rule
+    Properties:
+      Description: 'When there is an AWS Health event for Account Specific, trigger a Lambda to notify ServiceNow'
+      EventPattern:
+        source:
+          - aws.health
+        detail:
+          eventScopeCode:
+            - ACCOUNT_SPECIFIC
+      Targets:
+        -
+          Arn:
+            Fn::GetAtt:
+              - "rDxcmsHealthEventsLambda"
+              - "Arn"
+          Id: "TargetFunctionV1"
+
+  rDxcmsHealthAccountSpecificLambdaPermission:
+    Condition: CreateEnableAWSHealtAllEvents
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: "rDxcmsHealthEventsLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "rEventTriggerDxcmsHealthAccountSpecificEventsRule"
+          - "Arn"
+
+# SNS topic - All AWS Health events will be notified to users over the email
+  rDxcmsHealthNotifyAllTopic:
+    Type: AWS::SNS::Topic
+
+# Event rule that will look for All AWS health events and triggers a lambda to send the email notification
+  rEventTriggerDxcmsHealthNotifyAllEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: 'When there is any AWS Health event, trigger a Lambda to notify through email'
+      EventPattern:
+        source:
+          - aws.health
+      Targets:
+        -
+          Arn:
+            Fn::GetAtt:
+              - "rDxcmsHealthAllEventsNotificationLambda"
+              - "Arn"
+          Id: "TargetFunctionV2"
+
+  rDxcmsHealthNotifyAllLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: "rDxcmsHealthAllEventsNotificationLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "rEventTriggerDxcmsHealthNotifyAllEventsRule"
+          - "Arn"
+
+#Lambda function to format the event and publish SNS topic for email notification
+  rDxcmsHealthAllEventsNotificationLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthAllEventsNotificationLambdaRole
+      - Key: Owner
+        Value: DXC
+      Policies:
+        - PolicyName: !Join ["-", ["DxcmsHealthAllEventsNotificationLambdaPerms", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-aws-health-all-events-notification-${AWS::Region}:*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - !Ref rDxcmsHealthNotifyAllTopic
+
+  rDxcmsHealthAllEventsNotificationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "dxcms-aws-health-all-events-notification-${AWS::Region}"
+      Environment:
+        Variables:
+          notification_topic: !Ref rDxcmsHealthNotifyAllTopic
+      Description: 'Lambda to process ALL AWS Health events and publish to sns topic for email notification'
+      Runtime: python3.11
+      Handler: dxcms_aws_health_all_events_notification.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt rDxcmsHealthAllEventsNotificationLambdaRole.Arn
+      Timeout: 900
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/aws_health_all_events_notification.zip"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: !Sub "dxcms-aws-health-all-events-notification-${AWS::Region}"
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsHealthEventsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsHealthEventsLambdaRole
+      - Key: Owner
+        Value: DXC
+      Policies:
+        - PolicyName: !Join ["-", ["DxcmsAWSHealthLambdaPerms", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-aws-health-events-${AWS::Region}:*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AccountFeatureDefinitions"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FeatureCommonServicenowStack-Servicenow-*"
+
+  rDxcmsHealthEventsLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "dxcms-aws-health-events-${AWS::Region}"
+      Environment:
+        Variables:
+          STACK_REGION: !Sub '${AWS::Region}'
+          EXECUTION_ACCOUNT: !Sub '${AWS::AccountId}'
+          servicenow_topic: !Ref pServiceNowInputTopic
+      Description: 'Lambda to process ALL AWS Health events and also service type RISK, and create a ServiceNow incident'
+      Runtime: python3.11
+      Handler: dxcms_aws_health.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt rDxcmsHealthEventsLambdaRole.Arn
+      Timeout: 900
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/aws_health_events.zip"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: !Sub "dxcms-health-risk-${AWS::Region}"
+      - Key: Owner
+        Value: DXC

@@ -1,0 +1,25 @@
+Feature: DXCUnixSoeHardening
+Version: '12.0.0.8'
+StandardCreationBatch: 1
+EnableFeature: true
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creates DXCUnixSoeHardening SSM Document
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - DXCUnixSoeHardening.json
+ 

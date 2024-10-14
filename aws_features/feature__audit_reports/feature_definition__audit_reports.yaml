@@ -1,0 +1,47 @@
+---
+# Feature Definition (FD) for audit_reports
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AuditReports
+Version: '9.0.0.3'
+StandardCreationBatch: 2
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Feature which generates Audit reports for AWS Resources
+
+FeatureParams:
+
+  pfAuditReportGenCron:
+    Default: cron(15 3 * * ? *)
+    Description: Cron exprssion to schedule, creates the audit report for all the mentioned resources
+    Type: String
+
+  pfShortDescForSNOW:
+    Description: 'Short Description which will be used while creating the SNOW incident.'
+    Type: String
+    Default: "Audit Reports"
+  
+  pfAWSResources:
+    Type: String
+    Default: "IAM_USERS"
+    Description: Resources for which report needs to be generated. Ex - IAM_USERS
+                 Values must be comma separated and from the list given below 
+                 Allowed Values - IAM_USERS
+
+  pfSnowInciPriority:
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3']
+    Description: Priority of the incident to be created for Audit notification
+    
+
+AllowDisable: true
+ResourceDeployment:
+  - AuditReports.yaml

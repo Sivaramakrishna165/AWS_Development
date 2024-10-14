@@ -1,0 +1,309 @@
+{
+  "Comment": "This State Machine will perform the patch scan on the scheduled instances.",
+  "StartAt": "Parallel",
+  "States": {
+    "Parallel": {
+      "Type": "Parallel",
+      "Next": "state_machine_patch_scan_output_processing",
+      "Branches": [
+        {
+          "StartAt": "start_stopped_state_instances_schedule_phase",
+          "States": {
+            "start_stopped_state_instances_schedule_phase": {
+              "Type": "Task",
+              "Resource": "${start_stopped_state_instances_schedule_phase}",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 20
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "start_stopped_state_instances_schedule_phase_error"
+                }
+              ],
+              "Next": "Wait"
+            },
+            "start_stopped_state_instances_schedule_phase_error": {
+              "Type": "Pass",
+              "Parameters": {
+                "Cause.$": "$.Cause",
+                "State.$": "$$.State",
+                "ErrorMessageFrom": "start_stopped_state_instances_schedule_phase Function"
+              },
+              "End": true
+            },
+            "Wait": {
+              "Type": "Wait",
+              "Seconds": 90,
+              "Next": "ssm_agent_validation"
+            },
+            "ssm_agent_validation": {
+              "Type": "Task",
+              "Resource": "${ssm_agent_validation}",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 20
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "ssm_agent_validation_error"
+                }
+              ],
+              "Next": "execute_patch_scan_for_schedule_phase"
+            },
+            "ssm_agent_validation_error": {
+              "Type": "Pass",
+              "Parameters": {
+                "Cause.$": "$.Cause",
+                "State.$": "$$.State",
+                "ErrorMessageFrom": "ssm_agent_validation Function"
+              },
+              "End": true
+            },
+            "execute_patch_scan_for_schedule_phase": {
+              "Type": "Task",
+              "Resource": "${execute_patch_scan_for_schedule_phase}",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 20
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "execute_patch_scan_for_schedule_phase_error"
+                }
+              ],
+              "Next": "wait_for_check_command_status"
+            },
+            "execute_patch_scan_for_schedule_phase_error": {
+              "Type": "Pass",
+              "Parameters": {
+                "Cause.$": "$.Cause",
+                "State.$": "$$.State",
+                "ErrorMessageFrom": "execute_patch_scan_for_schedule_phase Function"
+              },
+              "End": true
+            },
+            "wait_for_check_command_status": {
+              "Type": "Wait",
+              "Seconds": 10,
+              "Next": "check_command_status"
+            },
+            "check_command_status": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.Status",
+                  "StringEquals": "completed",
+                  "Next": "stop_stopped_state_instances_schedule_phase"
+                },
+                {
+                  "Variable": "$.Status",
+                  "StringEquals": "pending",
+                  "Next": "Check_count"
+                }
+              ]
+            },
+            "Check_count": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.Count",
+                  "NumericEquals": 0,
+                  "Next": "terminate_patch_scan_ssm_cmd"
+                },
+                {
+                  "Variable": "$.Count",
+                  "NumericGreaterThan": 0,
+                  "Next": "wait_for_completion"
+                }
+              ]
+            },
+            "terminate_patch_scan_ssm_cmd": {
+              "Type": "Task",
+              "Resource": "${terminate_patch_scan_ssm_cmd}",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 3
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "terminate_patch_scan_ssm_cmd_error"
+                }
+              ],
+              "Next": "stop_stopped_state_instances_schedule_phase"
+            },
+            "terminate_patch_scan_ssm_cmd_error": {
+              "Type": "Pass",
+              "Parameters": {
+                "Cause.$": "$.Cause",
+                "State.$": "$$.State",
+                "ErrorMessageFrom": "terminate_patch_scan_ssm_cmd Function"
+              },
+              "End": true
+            },
+            "wait_for_completion": {
+              "Type": "Wait",
+              "SecondsPath": "$.WaitSeconds",
+              "Next": "check_patch_scan_cmd_status"
+            },
+            "check_patch_scan_cmd_status": {
+              "Type": "Task",
+              "Resource": "${check_patch_scan_cmd_status}",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 3
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "check_patch_scan_cmd_status_error"
+                }
+              ],
+              "Next": "check_command_status"
+            },
+            "check_patch_scan_cmd_status_error": {
+              "Type": "Pass",
+              "Parameters": {
+                "Cause.$": "$.Cause",
+                "State.$": "$$.State",
+                "ErrorMessageFrom": "check_patch_scan_cmd_status Function"
+              },
+              "End": true
+            },
+            "stop_stopped_state_instances_schedule_phase": {
+              "Type": "Task",
+              "Resource": "${stop_stopped_state_instances_schedule_phase}",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 20
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "stop_stopped_state_instances_schedule_phase_error"
+                }
+              ],
+              "End": true
+            },
+            "stop_stopped_state_instances_schedule_phase_error": {
+              "Type": "Pass",
+              "Parameters": {
+                "Cause.$": "$.Cause",
+                "State.$": "$$.State",
+                "ErrorMessageFrom": "stop_stopped_state_instances_schedule_phase Function"
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Pass",
+          "States": {
+            "Pass": {
+              "Type": "Pass",
+              "Parameters": {
+                "Input.$": "$",
+                "Execution.$": "$$.Execution.Id",
+                "StateMachine.$": "$$.StateMachine"
+              },
+              "End": true
+            }
+          }
+        }
+      ]
+    },
+    "state_machine_patch_scan_output_processing": {
+      "Type": "Task",
+      "Resource": "${state_machine_patch_scan_output_processing}",
+      "End": true
+    }
+  }
+}

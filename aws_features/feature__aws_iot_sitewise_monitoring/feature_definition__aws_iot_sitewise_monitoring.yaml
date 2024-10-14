@@ -1,0 +1,52 @@
+---
+# Feature Definition (FD) for AWSIotSitewiseMonitoring
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AWSIotSitewiseMonitoring
+Version: '9.0.0.2'
+StandardCreationBatch: 3
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creating the cloudwatch alarms for Iot Sitewise service.
+FeatureParams:
+  pCommonIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priroity fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+  pSupportedRegions:
+    Description: Regions that supports Iot Sitewise service, use comma seperation.
+    Type: String
+    Default: "us-east-1,us-east-2,us-west-2,ap-south-1,ap-northeast-2,ap-southeast-1,ap-southeast-2,ap-northeast-1,ca-central-1,eu-central-1,eu-west-1"
+  pLoggingFilter:
+    Description: logging Level of verbosity(set to 'OFF' for disabling logging Option).
+    Type: String
+    Default: 'OFF'
+    AllowedValues: ['ERROR', 'INFO', 'OFF']
+Alarms:
+  Gateway.Heartbeat_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: GatewayId
+      Value: <TO BE FILLED>
+    EvaluationPeriods: 1
+    MetricName: Gateway.Heartbeat
+    Namespace: AWS/IoTSiteWise
+    Period: 60
+    Statistic: Sum
+    Threshold: 0
+
+ResourceDeployment:
+  - aws_iot_sitewise_monitoring.yaml
+DepensOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities

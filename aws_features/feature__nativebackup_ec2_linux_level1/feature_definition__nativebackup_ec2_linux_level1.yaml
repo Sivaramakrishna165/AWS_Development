@@ -1,0 +1,97 @@
+---
+# Feature Definition (FD) for NativebackupEc2LinuxLevel1
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: NativebackupEc2LinuxLevel1
+Version: '11.0.0.2'
+StandardCreationBatch: 2
+EnableFeature: true
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: AWS Tag based Native backup solution for Ec2 Linux instances
+
+FeatureParams:
+
+  pfCreateNewBackupVault:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+    Description: "Create new Backup Vault for Ec2 Backup."
+
+  pfBackupVaultName:
+    Type: String
+    Description: "Enter the Backup Vault Name to be create for Ec2"
+    Default: 'Ec2LinuxLevel1BackUpVault'
+
+  pfBackupPlanName:
+    Type: String
+    Default: "Ec2-Linux-level1-BackUp-Plan"
+    Description: "AWS Ec2 Backup plan name."
+
+  pfBackupRuleName:
+    Type: String
+    Default: "Ec2-Linux-level1-RuleName"
+    Description: "AWS ec2 Backup rule name."
+
+  pfEc2BackupScheduleExpression:
+    Type: String
+    Default: "cron(15 12 * * ? *)"
+    Description: "AWS Backup cron expression."
+
+  pfBackupDeleteAfterDays:
+    Type: Number
+    Default: 30
+    Description: "Days to expire backups from vault."
+
+  pfBackupSelectionName:
+    Type: String
+    Default: "Ec2-Linux-level1-SelectionName"
+    Description: "AWS Backup selection name."
+
+  pfBackupConditionTagKey:
+    Type: String
+    Default: "aws:ResourceTag/LinuxNativeBackupLevel"
+    Description: "Tag:Key associated with the resources to back up."
+
+  pfBackupConditionTagValue:
+    Type: String
+    Default: "1"
+    Description: "Tag:Value associated with the resources to back up."
+
+  pfVaultMinRetentionDays:
+    Type: String
+    Default: 30
+    Description: "Retention period in days that the vault retains backup data and it should be lesser than or equals to pfBackupDeleteAfterDays."
+  
+  pSnsTopicName:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Backups/NativeBackupSnsTopic
+    Description: Sns topic name for the failed job notifications.
+
+  # pfVaultMaxRetentionDays:
+  #   Type: String
+  #   #Default: 30
+  #   Default: "dummy"
+  #   Description: "The maximum retention period that the vault retains its recovery points.
+  #                 Note: Leave it default if you don't need this"
+
+  # pfVaultChangeableForDays:
+  #   Type: String
+  #   Default: "dummy"
+  #   Description: "[WARNING] Number of days before the vault lock. After this period, Vault Lock becomes immutable and cannot be changed or deleted.
+  #                 NOTE: If this value is mentioned then, LockConfiguration will be Compliance mode otherwise Governance mode.
+  #                 Should be minimum 3 or greater"
+  
+
+AllowDisable: true
+ResourceDeployment:
+  - NativebackupEc2LinuxLevel1.yaml
+

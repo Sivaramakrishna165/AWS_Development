@@ -1,0 +1,172 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: "This feature creates one Amazon Elastic File Sysstem"
+
+Parameters:
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/SES/Module/ElasticFileSystem/S3AssetBucket"
+    Description: "SSM Parameter for bucket location"
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: None
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pFtEfsSubnetId:
+    Description: 'Leave default to automatically use Workload VPC v2 private subnet A. If entering pFtEfsVpcId then pFtEfsSubnetId must also be set'
+    Type: String
+    Default: 'dummy'
+  pFtEfsVpcId:
+    Description: 'Leave default to automatically use Workload VPC v2. If entering your own pFtEfsVpcId then pFtEfsSubnetId must also be set'
+    Type: String
+    Default: 'dummy'
+  pFtEfsBackupPolicy:
+    Description: 'Enables or disables EFS backups'
+    Type: String
+    Default: 'ENABLED'
+    AllowedValues: ['ENABLED', 'DISABLED']
+  pFtEfsEncryption:
+    Description: 'DO NOT CHANGE, Setting to True will use the default KMS key for Amazon EFS to encrypt the filesystem.'
+    Type: String
+    Default: True
+  pFtEfsPerformanceMode:
+    Description: 'The performance mode of the file system.  maxIO has higher latencies.  Cannot be changed once the filesystem is created '
+    Type: String
+    Default: 'generalPurpose'
+    AllowedValues: ['generalPurpose', 'maxIO']
+  pFtEfsThroughputMode:
+    Description: 'Set to bursting by default for lowest cost with unknown workload traffic'
+    Type: String
+    Default: 'bursting'
+    AllowedValues: ['bursting', 'elastic', 'provisioned']
+  pFtEfsProvisionedThroughputInMibps:
+    Description: "Not used for bursting throughput mode. The throughput, measured in MiB/s, that you want to provision for a file system that you're creating. Valid values are 1-1024. Cannot decrease it"
+    Type: Number
+    Default: 9999
+
+Conditions:
+  UseProvThroughputInMibps: !Not [!Equals [!Ref pFtEfsProvisionedThroughputInMibps, 9999]]
+  WorkloadVpcUpdated: !Not [!Equals [!Ref pFtEfsVpcId, 'dummy']]
+  SubnetIdUpdated: !Not [!Equals [!Ref pFtEfsSubnetId, 'dummy']]
+  UseWorkloadVpc: !Not [!And [!Condition WorkloadVpcUpdated, !Condition SubnetIdUpdated]]
+
+Resources:
+
+  rDxcEfsSg1:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: 'DxcEfsSg1'
+      GroupName: 'dxc-efs-sg-1'
+      VpcId: !If [UseWorkloadVpc, !GetAtt rInvokeCreateGetWorkloadvpcVpcidLambda.WlvpcVpcid, !Ref pFtEfsVpcId]
+
+  rDxcInstanceSg1:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: 'DxcInstanceSg1'
+      GroupName: 'dxc-instance-sg-1'
+      VpcId: !If [UseWorkloadVpc, !GetAtt rInvokeCreateGetWorkloadvpcVpcidLambda.WlvpcVpcid, !Ref pFtEfsVpcId]
+
+  rDxcInstanceSg1Egress1:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties: 
+      FromPort: 2049
+      ToPort: 2049
+      IpProtocol: tcp
+      DestinationSecurityGroupId: !GetAtt rDxcEfsSg1.GroupId
+      GroupId: !GetAtt rDxcInstanceSg1.GroupId
+
+  rDxcInstanceSg1Egress2:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties: 
+      IpProtocol: -1 
+      CidrIp: 0.0.0.0/0
+      GroupId: !GetAtt rDxcInstanceSg1.GroupId
+
+  rDxcEfsSg1Ingress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      FromPort: 2049
+      ToPort: 2049
+      IpProtocol: tcp
+      SourceSecurityGroupId: !GetAtt rDxcInstanceSg1.GroupId
+      GroupId: !GetAtt rDxcEfsSg1.GroupId
+
+  rCreateDxcEfs:
+    Type: AWS::EFS::FileSystem
+    Properties: 
+      BackupPolicy: 
+        Status: !Ref pFtEfsBackupPolicy
+      Encrypted: !Ref pFtEfsEncryption
+      PerformanceMode: !Ref pFtEfsPerformanceMode
+      ProvisionedThroughputInMibps: !If [UseProvThroughputInMibps, !Ref pFtEfsProvisionedThroughputInMibps, !Ref "AWS::NoValue"]
+      ThroughputMode: !Ref pFtEfsThroughputMode
+
+  rCreateMountTarget:
+    Type: AWS::EFS::MountTarget
+    Properties: 
+      FileSystemId: !Ref rCreateDxcEfs
+      SecurityGroups: 
+        - !Ref rDxcEfsSg1
+        - !Ref rDxcInstanceSg1 
+      SubnetId: !If [UseWorkloadVpc, !GetAtt rInvokeCreateGetWorkloadvpcVpcidLambda.MntTgtSubId, !Ref pFtEfsSubnetId]
+
+  rCreateGetWorkloadvpcVpcidLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "dxcms-GetWorkloadvpcVpcidLambda-${AWS::AccountId}-${AWS::Region}"
+      Environment:
+        Variables:
+          Aws_Region: !Sub '${AWS::Region}'
+          Aws_Account: !Sub '${AWS::AccountId}'
+      Description: 'Create lambda to find and return WorkloadVPC v2 VPCId to this CFT'
+      Runtime: python3.11
+      Handler: get_workloadvpc_vpcid.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt rCreateGetWorkloadvpcVpcidLambdaRole.Arn
+      Timeout: 30 
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/elastic_file_system.zip"
+
+  rCreateGetWorkloadvpcVpcidLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Join ["-", ["dxcms", "GetWorkloadvpcVpcidLambda", !Ref "AWS::AccountId", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-GetWorkloadvpcVpcidLambda-${AWS::AccountId}-${AWS::Region}*"
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
+                Resource:
+                  - "*"
+
+  rInvokeCreateGetWorkloadvpcVpcidLambda:
+    Type: "Custom::InvokeCreateGetWorkloadvpcVpcidLambda"
+    Properties:
+      ServiceToken: !Sub "${rCreateGetWorkloadvpcVpcidLambda.Arn}"

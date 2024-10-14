@@ -1,0 +1,82 @@
+---
+# Feature Definition (FD) for the AWS ECS EC2 Based CloudWatch Dashboard as a feature 
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: EcsEc2ClusterCloudwatchDashboard
+Version: '9.0.0.1'
+StandardCreationBatch: 4
+EnableFeature: False
+FeatureParams:
+  pDashboardName:
+    Description: Enter the dashboard name for the ECS EC2 launch type Container Instances running desired no. of tasks.
+    Type: String
+    Default: ""
+  pClusterName:
+    Description: Name of the ECS cluster which can be retrieved from the output section of previous to previous feature deployment.
+    Type: String
+    Default: ""
+  pServiceName:
+    Description: Name of the ECS Service which can be retrieved from the output section of previous feature deployment.
+    Type: String
+    Default: ""
+  pECSClusterRelatedAlarm:
+    Description: 'Enable this when you want to create Cluster related Alarm for CPU and MEMORY. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities should be deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  pECSInstancesRelatedAlarm:
+    Description: 'Enable this when you want to create Instance related Alarm for CPU and MEMORY. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities should be deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  pEcsEc2InstancesCPUUtilThreshold:
+    Type: String
+    Default: 80
+    Description: The target utilization for the ECS EC2 Container Instances CPU.
+  pEcsEc2InstancesMemoryUtilThreshold:
+    Type: String
+    Default: 80
+    Description: The target utilization in for the ECS EC2 Container Instances Memory.   
+  pEcsEc2ClusterCPUUtilThreshold:
+    Type: String
+    Default: 80
+    Description: The target utilization for the ECS EC2 Cluster CPU.
+  pEcsEc2ClusterMemoryUtilThreshold:
+    Type: String
+    Default: 80
+    Description: The target utilization in MB for the ECS EC2 Cluster Memory.
+  pECSClustersandInstancesComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+  pECSClusterandInstancesStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Average'
+  pPeriodOverWhichStatIsAppliedForCpuAndMemory:
+    Type: String
+    Default: 60
+    Description: Provided the default value in multiple of 60 in seconds, over which the statistic is applied for CPU and Memory.  
+  pEvaluationPeriod:
+    Type: String
+    Default: 2
+    Description: Provided the default number of periods over which data is compared to the specified threshold.
+  pPriorityIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priority fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creating a Feature which creates an AWS CloudWatch Dashboard for Amazon ECS EC2 Launch Type to check the ECS Container and Tasks metrics.
+AllowDisable: true
+ResourceDeployment:
+  - EcsEc2ClusterCloudwatchDashboard.yaml
+DependsOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities

@@ -1,0 +1,295 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: 'This stack creates GuardDuty which monitors the Security of AWS Environment'
+
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/GuarddutyRegional/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: None
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pSecurityNotifyEmail:
+    Type: String
+    Default: 'None'
+    Description: 'Notification email for security events via SNS. Leave blank to not create any SNS or monitoring resources.'
+  pPublishingFrequency:
+    Type: String
+    Description: 'Specifies how frequently finding updates are published.'
+    Default: "ONE_HOUR"
+    AllowedValues: ["FIFTEEN_MINUTES", "ONE_HOUR", "SIX_HOURS"]
+  pGuardDutySeverity:
+    Type: String
+    Description: 'Determines the severity level to begin sending CloudWatch Events from GuardDuty'
+    Default: 'All'
+    AllowedValues:
+      - 'High'
+      - 'Medium'
+      - 'All'
+
+Conditions:
+  cCreateSNSAlarms: !Not [ !Equals ['', !Ref pSecurityNotifyEmail] ]
+  cCreateEventsRuleAll: !And [ !Condition cCreateSNSAlarms, !Equals ['All', !Ref pGuardDutySeverity] ]
+  cCreateEventsRuleHigh: !And [ !Condition cCreateSNSAlarms, !Equals ['High', !Ref pGuardDutySeverity] ]
+  cCreateEventsRuleMed: !And [ !Condition cCreateSNSAlarms, !Equals ['Medium', !Ref pGuardDutySeverity] ]
+  #cAllSeverity: !Equals ['All', !Ref pGuardDutySeverity]
+  #cMediumSeverity: !Equals ['Medium', !Ref pGuardDutySeverity]
+  #cHighSeverity: !Equals ['High', !Ref pGuardDutySeverity]
+
+Resources:
+  rGuardDutyDetector:
+    Type: 'AWS::GuardDuty::Detector'
+    Properties:
+      Enable: true
+      FindingPublishingFrequency: !Ref pPublishingFrequency
+
+  rGuardDutyEventsRuleAll:
+    Type: 'AWS::Events::Rule'
+    Condition: cCreateEventsRuleAll
+    Properties:
+      Name: 'AWSMS-GuardDutyEventsAll'
+      Description: 'Events Rule for All GuardDuty Findings'
+      EventPattern:
+        source:
+          - "aws.guardduty"
+        detail-type:
+          - "GuardDuty Finding"
+      State: ENABLED
+      Targets:
+        - Arn: !Ref rGuardDutySecurityNotifyTopic
+          Id: 'GuardDutySecurityNotifyTopic'
+          InputTransformer:
+            InputPathsMap:
+              accountID: "$.detail.accountId"
+              region: "$.detail.region"
+              severity: "$.detail.severity"
+              findingID: "$.detail.id"
+              findingType: "$.detail.type"
+              findingTitle: "$.detail.title"
+              findingDesc: "$.detail.description"
+              findingRaw: "$.detail"
+            InputTemplate: |
+              "DXC AWSMS AWS Account GuardDuty Finding!"
+              "AWS Account: <accountID> | Region: <region>"
+              "Please investigate following finding:"
+              "Type: <findingType>"
+              "Title: <findingTitle>"
+              "Severity: <severity>"
+              "Description: <findingDesc>"
+              "Finding ID: <findingID>"
+              "Raw Detail:"
+              "<findingRaw>"
+
+  rGuardDutyEventsRuleMed:
+    Type: 'AWS::Events::Rule'
+    Condition: cCreateEventsRuleMed
+    Properties:
+      Name: 'AWSMS-GuardDutyEventsMedium'
+      Description: 'Events Rule for Medium and higher severity GuardDuty Findings'
+      EventPattern: |
+        {
+            "source": [
+                "aws.guardduty"
+            ],
+            "detail-type": [
+                "GuardDuty Finding"
+            ],
+            "detail": {
+                "severity": [
+                    4,
+                    4.1,
+                    4.2,
+                    4.3,
+                    4.4,
+                    4.5,
+                    4.6,
+                    4.7,
+                    4.8,
+                    4.9,
+                    5,
+                    5.1,
+                    5.2,
+                    5.3,
+                    5.4,
+                    5.5,
+                    5.6,
+                    5.7,
+                    5.8,
+                    5.9,
+                    6,
+                    6.1,
+                    6.2,
+                    6.3,
+                    6.4,
+                    6.5,
+                    6.6,
+                    6.7,
+                    6.8,
+                    6.9,
+                    7,
+                    7.1,
+                    7.2,
+                    7.3,
+                    7.4,
+                    7.5,
+                    7.6,
+                    7.7,
+                    7.8,
+                    7.9,
+                    8,
+                    8.1,
+                    8.2,
+                    8.3,
+                    8.4,
+                    8.5,
+                    8.6,
+                    8.7,
+                    8.8,
+                    8.9
+                ]
+            }
+        }
+      State: ENABLED
+      Targets:
+        - Arn: !Ref rGuardDutySecurityNotifyTopic
+          Id: 'GuardDutySecurityNotifyTopic'
+          InputTransformer:
+            InputPathsMap:
+              accountID: "$.detail.accountId"
+              region: "$.detail.region"
+              severity: "$.detail.severity"
+              findingID: "$.detail.id"
+              findingType: "$.detail.type"
+              findingTitle: "$.detail.title"
+              findingDesc: "$.detail.description"
+              findingRaw: "$.detail"
+            InputTemplate: |
+              "DXC AWSMS AWS Account GuardDuty Finding!"
+              "AWS Account: <accountID> | Region: <region>"
+              "Please investigate following finding:"
+              "Type: <findingType>"
+              "Title: <findingTitle>"
+              "Severity: <severity>"
+              "Description: <findingDesc>"
+              "Finding ID: <findingID>"
+              "Raw Detail:"
+              "<findingRaw>"
+
+  rGuardDutyEventsRuleHi:
+    Type: 'AWS::Events::Rule'
+    Condition: cCreateEventsRuleHigh
+    Properties:
+      Name: 'AWSMS-GuardDutyEventsHigh'
+      Description: 'Events Rule for High severity GuardDuty Findings'
+      EventPattern: |
+        {
+            "source": [
+                "aws.guardduty"
+            ],
+            "detail-type": [
+                "GuardDuty Finding"
+            ],
+            "detail": {
+                "severity": [
+                    7,
+                    7.1,
+                    7.2,
+                    7.3,
+                    7.4,
+                    7.5,
+                    7.6,
+                    7.7,
+                    7.8,
+                    7.9,
+                    8,
+                    8.1,
+                    8.2,
+                    8.3,
+                    8.4,
+                    8.5,
+                    8.6,
+                    8.7,
+                    8.8,
+                    8.9
+                ]
+            }
+        }
+      State: ENABLED
+      Targets:
+        - Arn: !Ref rGuardDutySecurityNotifyTopic
+          Id: 'GuardDutySecurityNotifyTopic'
+          InputTransformer:
+            InputPathsMap:
+              accountID: "$.detail.accountId"
+              region: "$.detail.region"
+              severity: "$.detail.severity"
+              findingID: "$.detail.id"
+              findingType: "$.detail.type"
+              findingTitle: "$.detail.title"
+              findingDesc: "$.detail.description"
+              findingRaw: "$.detail"
+            InputTemplate: |
+              "DXC AWSMS AWS Account GuardDuty Finding!"
+              "AWS Account: <accountID> | Region: <region>"
+              "Please investigate following finding:"
+              "Type: <findingType>"
+              "Title: <findingTitle>"
+              "Severity: <severity>"
+              "Description: <findingDesc>"
+              "Finding ID: <findingID>"
+              "Raw Detail:"
+              "<findingRaw>"
+
+# CloudTrail SNS Security Notification
+  rGuardDutySecurityNotifyTopic:
+    Type: 'AWS::SNS::Topic'
+    Condition: cCreateSNSAlarms
+    Properties:
+      TopicName: 'dxcms-GuardDutySecurityNotifyTopic'
+      Subscription:
+        - Endpoint: !Ref pSecurityNotifyEmail
+          Protocol: email
+  rGuardDutySecurityNotifyTopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Condition: cCreateSNSAlarms
+    Properties:
+      PolicyDocument:
+        Id: 'SecurityNotifyTopicPolicy'
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "AllowPublish"
+            Effect: Allow
+            Principal:
+              Service: 'events.amazonaws.com'
+            Action:
+              - sns:GetTopicAttributes
+              - sns:ListSubscriptionsByTopic
+              - sns:Publish
+              - sns:Subscribe
+            Resource: !Ref rGuardDutySecurityNotifyTopic
+      Topics:
+        - !Ref rGuardDutySecurityNotifyTopic
+
+# SSM Param outputs
+  rGuardDutySecurityNotifyTopicArn:
+    Type: 'AWS::SSM::Parameter'
+    Condition: cCreateSNSAlarms
+    Properties:
+      Type: String
+      Name: '/DXC/GuardDutySecurityNotifyTopicArn'
+      Description: 'GuardDuty Security Notify SNS Topic ARN'
+      Value: !Ref rGuardDutySecurityNotifyTopic
+
+Outputs:
+  oGuardDutySecurityNotifyTopicArn:
+    Description: 'GuardDuty Security Notify SNS Topic ARN'
+    Condition: cCreateSNSAlarms
+    Value: !Ref rGuardDutySecurityNotifyTopic
+    Export:
+      Name: !Sub "${AWS::StackName}:GuardDutySecurityNotifyTopicArn"

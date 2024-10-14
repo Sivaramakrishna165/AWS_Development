@@ -1,0 +1,798 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CI/CD pipeline to push images into ECR Repository in same/cross region/account first and then does the automated deployment on ECS Containerized Infrastructure based on the push of certain branches inside Github Repository.
+Parameters:
+  pBuildFile:
+    Type: String
+    Default: ''
+    Description: "Buildspec file to run during the pipeline to build the image"
+  pBuildFilePush:
+    Type: String
+    Default: ''
+    Description: "Buildspec file to run during the pipeline push the image to ECR repossitory"  
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/DxcEcsFargateAdCicdPipeline/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+  pSESLayerArn:
+    Description: "SSM parameter for Lambda Layer ARN"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/SES/SESLayerLambdaArn
+  pSourceType:
+    Description: "Source type which we are using"
+    Type: "String"
+    Default: 'GITHUB_ENTERPRISE'
+  pGitHubRepository:
+    Type: String
+    Default: ''
+  pGitHubBranch:
+    Type: String
+    Default: ''
+  pGithubSourceLocation:
+    Type: String
+    Default: ''
+    Description: 'This is the source location provided under codebuild project. we need to provide <GITHUB-URL> here'      
+  pCodeBuildSourceVersion:
+    Type: String
+    Default: ''
+  pArtifactsS3KeyLocation:
+    Default: ''
+    Description: 'S3 key location of the templates'
+    Type: String   
+  pManualApproval:
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: >-
+      Require manual approval before pushing docker images to ECR repositoy, will email
+      Primary Email and (optionally) Secondary Email specified in the
+      Email Notification Settings section
+  pEmailPrimary:
+    Default: ''
+    Description: 'Primary email to notify for pending manual approvals and pipeline execution notifications'
+    Type: String
+  pEmailSecondary:
+    Default: ''
+    Description: 'Secondary email to notify for pending manual approvals and pipeline execution notifications'
+    Type: String        
+  pCodeStarConnectionARN:
+    Type: String
+    Description: Enter the connection ARN
+    Default: ''
+  pECRRepositoryName:
+    Type: String
+    AllowedPattern: "^[a-z0-9-_/.]*$"
+    Description: Name of the ECR repository to be created
+    Default: ''
+  pEncryptionOption:
+    Type: String
+    Default: Default KMS
+    Description: Select the encryption option for the repository
+    AllowedValues:
+      - Default KMS
+      - Customer Managed KMS
+  pKmsKeyArn:
+    Type: String
+    Description: The KMS key ARN to use for encryption (required if EncryptionOption is KMS) 
+    Default: ""  
+  pImageTagMutability:
+    Type: String
+    Default: 'MUTABLE'
+    Description: 'Provided the MUTABLE as tag Immutability (where tag can be overwritten) so that we can have latest tag in every image deployment'
+  pScanonPush:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: 'Enable this option if you want to scan the image on first push else choose the other option' 
+  pCrossRegionReplication:
+    Description: Enable cross-region replication by choosing true as an option, else keep it default to false.
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+  pCrossAccountReplication:
+    Description: Enable cross-account replication by choosing true as an option, else keep it default to false.
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+  pCrossRegionDestinationRegions:
+    Description: Comma-separated list of destination regions for cross-region replication
+    Type: String
+    Default: ''
+  pCrossAccountDestinationRegions:
+    Description: Comma-separated list of destination regions for cross-account replication
+    Type: String
+    Default: ''
+  pCrossAccountDestinationAccountIds:
+    Description: Comma-separated list of destination account IDs for cross-account replication
+    Type: String
+    Default: ''
+  pEcsClusterName:
+    Default: ''
+    Description: 'Provide the ECS Cluster Name here'
+    Type: String   
+  pEcsContainerName:
+    Type: String
+    Default: ''
+    Description: 'Provide the ECS Container Name here'  
+  pEcsServiceName:
+    Default: ''
+    Description: 'Provide the ECS Service Name here'
+    Type: String  
+  pEcsImageDefinitionFileName:
+    Default: 'imagedefinitions.json'
+    Description: 'Provide the ECS Image Definition file Name here'
+    Type: String      
+  
+  pPushImageApplyFailedBuildsAlarm:
+    Description: 'Enable for creating Failed Builds Alarm for push image project. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities is deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  pPushImageFailedBuildsPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 60
+  pPushImageFailedBuildsStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Sum'
+  pPushImageFailedBuildsThreshold:
+    Description: 'The value to compare with the specified statistic.'
+    Type: Number
+    Default: 0
+    
+  pPushImageFailedBuildsEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 2
+  pPushImageFailedBuildsComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  pBuildAndTagApplyFailedBuildsAlarm:
+    Description: 'Enable for creating Failed Builds Alarm for build and tag project. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities is deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  pBuildAndTagFailedBuildsPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 60
+  pBuildAndTagFailedBuildsStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Sum'
+  pBuildAndTagFailedBuildsThreshold:
+    Description: 'The value to compare with the specified statistic.'
+    Type: Number
+    Default: 0
+    
+  pBuildAndTagFailedBuildsEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 2
+  pBuildAndTagFailedBuildsComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  pPriorityIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priority fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+
+Conditions: 
+  UseKmsEncryption:
+    !Equals [!Ref pEncryptionOption, 'Default KMS']
+  ManualApproval: !Equals 
+    - !Ref pManualApproval
+    - 'Yes'
+  EmailPrimary: !Not 
+    - !Equals 
+      - !Ref pEmailPrimary
+      - ''
+  EmailSecondary: !Not 
+    - !Equals 
+      - !Ref pEmailSecondary
+      - ''  
+  cCreateFailedBuildsAlarmBuildAndTag: !Equals [!Ref "pBuildAndTagApplyFailedBuildsAlarm", "true"] 
+  cCreateFailedBuildsAlarmPushImage: !Equals [!Ref "pPushImageApplyFailedBuildsAlarm", "true"] 
+  
+Resources:
+  # IAM Roles  
+  rCodeBuildServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: !Join ["-", ["dxc-ecr-cicd-codebuild-role",!Ref "AWS::AccountId", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: ECRPermission
+                Effect: Allow
+                Action:
+                  - "ecr:GetAuthorizationToken"
+                  - "ecr:BatchCheckLayerAvailability"
+                  - "ecr:GetDownloadUrlForLayer"
+                  - "ecr:GetRepositoryPolicy"
+                  - "ecr:DescribeRepositories"
+                  - "ecr:ListImages"
+                  - "ecr:DescribeImages"
+                  - "ecr:BatchGetImage"
+                  - "ecr:BatchDeleteImage"
+                  - "ecr:CreateRepository"
+                  - "ecr:DeleteRepository"
+                  - "ecr:InitiateLayerUpload"
+                  - "ecr:UploadLayerPart"
+                  - "ecr:CompleteLayerUpload"
+                  - "ecr:PutImage"
+                  - "ecr:GetLifecyclePolicy"
+                  - "ecr:GetLifecyclePolicyPreview"
+                  - "ecr:ListTagsForResource"
+                  - "ecr:PutLifecyclePolicy"
+                  - "ecr:SetRepositoryPolicy"
+                  - "ecr:TagResource"
+                  - "ecr:UntagResource"
+                Resource:
+                  - "*"
+              - Sid: CloudwatchLogsPermission 
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutRetentionPolicy 
+                Resource:
+                  - !Sub >-
+                    arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*
+              - Sid: CodebuildPermission
+                Effect: Allow
+                Action:
+                  - 'codebuild:CreateReportGroup'
+                  - 'codebuild:CreateReport'
+                  - 'codebuild:BatchPutTestCases'
+                  - 'codebuild:UpdateReport'
+                Resource:
+                  - !Sub >-
+                    arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/*
+              - Sid: CodebuildProjectPermission
+                Effect: Allow
+                Action:
+                  - 'codebuild:ListProjects'
+                  - 'codebuild:ListBuilds'
+                  - 'codecommit:GitPull'
+                  - 'codecommit:GetRepository'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'codestar-connections:UseConnection'
+                Resource:
+                  - !Sub '${pCodeStarConnectionARN}'      
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:DeleteObject'
+                  - 's3:Get*'
+                  - 's3:List*'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${rArtifactBucket}/*'
+                  - !Sub 'arn:aws:s3:::${rArtifactBucket}'
+              - Effect: Allow
+                Action:
+                  - 'codebuild:StopBuild'
+                  - 'codebuild:UpdateProject'
+                  - 'codebuild:ListProjects'
+                  - 'codebuild:StartBuild'
+                  - 'codebuild:BatchGetBuilds'
+                Resource:
+                  - !Sub 'arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/*'
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParameter'
+                  - 'ssm:PutParameter'
+                Resource:
+                  - "*"   
+  
+  rCodePipelineServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: !Join ["-", ["dxc-ecs-cicd-pipeline-role",!Ref "AWS::AccountId", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: CloudWatchLogsPolicy
+                Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+              - Sid: CodeBuildPolicy
+                Effect: Allow
+                Action:
+                  - 'codebuild:BatchGetBuilds'
+                  - 'codebuild:StartBuild'
+                  - 'codebuild:BatchGetBuildBatches'
+                  - 'codebuild:StartBuildBatch'
+                Resource: '*'
+              - Sid: ecrpolicy
+                Effect: Allow
+                Action:
+                  - 'ecr:DescribeImages'
+                Resource:
+                  - "*"
+              - Sid: ArtifactsBuckets
+                Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:Get*'
+                  - 's3:List*'
+                  - 's3:DeleteObject'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${rArtifactBucket}/*'
+                  - !Sub 'arn:aws:s3:::${rArtifactBucket}'    
+              - Sid: CodeStarConnection
+                Effect: Allow
+                Action:
+                  - 'codestar-connections:UseConnection'
+                Resource:
+                  - !Sub '${pCodeStarConnectionARN}'
+              - !If 
+                - ManualApproval
+                - Sid: SNSAcces                  
+                  Action:
+                    - 'sns:Publish'
+                  Resource:
+                    - !Ref rEcrcicdApprovalSNSTopic
+                  Effect: Allow
+                - !Ref 'AWS::NoValue'    
+
+  rECSCustomerManagedPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Join ["-", ["dxc-ecs-cicd-pipeline-cmpolicy",!Ref "AWS::AccountId", !Ref "AWS::Region"]]
+      Roles: 
+        - !Ref rCodePipelineServiceRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: VisualEditor0
+            Effect: Allow
+            Action:
+              - ecs:UpdateCluster
+              - ecs:ExecuteCommand
+              - ecs:StartTask
+              - ecs:DescribeTaskDefinition
+              - ecs:ListServices
+              - ecs:UpdateService
+              - ecs:CreateService
+              - ecs:RunTask
+              - ecs:ListTasks
+              - ecs:RegisterTaskDefinition
+              - ecs:StopTask
+              - ecs:DescribeServices
+              - ecs:TagResource
+              - ecs:DescribeTasks
+              - ecs:UntagResource
+              - ecs:ListTaskDefinitions
+              - ecs:UpdateTaskSet
+              - ecs:CreateTaskSet
+              - ecs:ListClusters
+              - ecs:SubmitTaskStateChange
+              - ecs:DiscoverPollEndpoint
+              - ecs:CreateCluster
+              - ecs:DeleteService
+              - ecs:DeleteCluster
+              - ecs:DescribeClusters
+              - ecs:ListTagsForResource
+              - ecs:StartTelemetrySession
+              - ecs:ListTaskDefinitionFamilies
+            Resource: "*"
+          - Sid: VisualEditor1
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: "*"
+            Condition:
+              StringEqualsIfExists:
+                iam:PassedToService:
+                  - cloudformation.amazonaws.com
+                  - elasticbeanstalk.amazonaws.com
+                  - ec2.amazonaws.com
+                  - ecs-tasks.amazonaws.com              
+  
+  rArtifactBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  
+  rECRRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: DxcmsAwsECRFeatureRole
+      - Key: Owner
+        Value: DXC
+      Policies:
+        - PolicyName: !Join ["-", ["dxc-ecr-cicd-ecr-role", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - "*"
+              - Effect: Allow
+                Action:
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr-public:InitiateLayerUpload
+                Resource: 
+                  - "*"
+              - Effect: Allow
+                Action:
+                  - ecr:CreateRepository
+                  - ecr:BatchImportUpstreamImage
+                  - ecr:ReplicateImage
+                Resource:
+                  - "*"
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DescribeAlarms
+                Resource: 
+                  - '*'
+  
+  rECRLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+      Policies:
+        - PolicyName: !Join ["-", ["dxc-kms-RetireGrant-policy", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:RetireGrant
+                Resource: "*"  
+
+  rEcrcicdApprovalSNSTopic:
+    Condition: ManualApproval
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      Subscription:
+        - !If 
+          - EmailPrimary
+          - Endpoint: !Ref pEmailPrimary
+            Protocol: email
+          - !Ref 'AWS::NoValue'
+        - !If 
+          - EmailSecondary
+          - Endpoint: !Ref pEmailSecondary
+            Protocol: email
+          - !Ref 'AWS::NoValue'
+  
+  rECRRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref pECRRepositoryName
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: !If
+          - UseKmsEncryption
+          - !Ref "AWS::NoValue"
+          - !Ref pKmsKeyArn
+      ImageScanningConfiguration: 
+        ScanOnPush: !Ref pScanonPush
+      ImageTagMutability: !Ref pImageTagMutability
+      Tags: 
+        - Key: "Owner"
+          Value: "DXC"
+  
+  rDxcmsEcrReplicationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: dxcms_amazon_ecr_img_replication.lambda_handler
+      MemorySize: 128
+      Timeout: 60
+      Layers:
+        - !Ref pSESLayerArn
+      Role: !GetAtt rECRLambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/dxcms_amazon_ecr_img_replication.zip" 
+      Environment:
+        Variables:
+          CrossRegionReplication: !Ref pCrossRegionReplication
+          CrossAccountReplication: !Ref pCrossAccountReplication
+          CrossRegionDestinationRegions: !Ref pCrossRegionDestinationRegions
+          CrossAccountDestinationRegions: !Ref pCrossAccountDestinationRegions
+          CrossAccountDestinationAccountIds: !Ref pCrossAccountDestinationAccountIds
+          ECRRepositoryName: !Ref pECRRepositoryName
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+      - Key: Purpose
+        Value: ECR replication rule configuration    
+  
+  CustomInvokingLambda:
+    Type: Custom::InvokeReplicationLambda
+    DependsOn: rDxcmsEcrReplicationLambda
+    Properties:
+      ServiceToken: !GetAtt 
+        - rDxcmsEcrReplicationLambda
+        - Arn 
+
+  rBuildandTagCodeBuildProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Join ["-", [!Ref pGitHubBranch, "cb-buildandtag", !Ref AWS::StackName]]
+      ServiceRole: !Ref rCodeBuildServiceRole
+      Artifacts:
+        Type: S3
+        Location: !Ref rArtifactBucket
+      Source:
+        Type: !Ref pSourceType
+        Location: !Ref pGithubSourceLocation
+        BuildSpec: !Ref pBuildFile
+      SourceVersion: !Ref pCodeBuildSourceVersion
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: 'aws/codebuild/amazonlinux2-x86_64-standard:4.0'
+        ComputeType: BUILD_GENERAL1_SMALL
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ECR_REPO_NAME
+            Value: !Ref pECRRepositoryName
+          - Name: ACCOUNT_ID
+            Value: !Sub '${AWS::AccountId}' 
+      QueuedTimeoutInMinutes: 60
+      TimeoutInMinutes: 60
+  
+  rPushImageCodeBuildProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Join ["-", [!Ref pGitHubBranch, "cb-push", !Ref AWS::StackName]]
+      ServiceRole: !Ref rCodeBuildServiceRole
+      Artifacts:
+        Type: S3
+        Location: !Ref rArtifactBucket
+      Source:
+        Type: !Ref pSourceType
+        Location: !Ref pGithubSourceLocation
+        BuildSpec: !Ref pBuildFilePush
+      SourceVersion: !Ref pCodeBuildSourceVersion
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: 'aws/codebuild/amazonlinux2-x86_64-standard:4.0'
+        ComputeType: BUILD_GENERAL1_SMALL
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ECR_REPO_NAME
+            Value: !Ref pECRRepositoryName
+          - Name: ACCOUNT_ID
+            Value: !Sub '${AWS::AccountId}' 
+          - Name: CONTAINER_NAME
+            Value: !Ref pEcsContainerName
+      QueuedTimeoutInMinutes: 60
+      TimeoutInMinutes: 60
+
+  rCodePipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: !Join ["-", [!Ref pGitHubBranch, "cp", !Ref AWS::StackName]]
+      RoleArn: !GetAtt 
+        - rCodePipelineServiceRole
+        - Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref rArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              RunOrder: 1
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Sub '${pCodeStarConnectionARN}'
+                BranchName: !Ref pGitHubBranch
+                FullRepositoryId: !Ref pGitHubRepository
+                DetectChanges: true
+              Namespace: SourceVariables
+              OutputArtifacts:
+                - Name: SourceArtifact
+
+        - Name: Build_and_Tag_Image
+          Actions:
+            - Name: Build
+              RunOrder: 2
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref rBuildandTagCodeBuildProject
+              InputArtifacts:
+                - Name: SourceArtifact
+
+        - !If 
+          - ManualApproval
+          - Name: Approval
+            Actions:
+            - InputArtifacts: []
+              Name: Manual_Approval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: '1'
+                Provider: Manual
+              Configuration:
+                NotificationArn: !Ref rEcrcicdApprovalSNSTopic
+                ExternalEntityLink: !Join 
+                  - ''
+                  - - 'https://'
+                    - !Ref 'AWS::Region'
+                    - .console.aws.amazon.com/codepipeline/home?region=
+                    - !Ref 'AWS::Region'
+                    - '#/dashboard'
+                CustomData: !Sub
+                  Please thoroughly review pipeline test results before approving for Account - ${AWS::AccountId}.
+              RunOrder: 3
+          - !Ref 'AWS::NoValue'
+        
+        - Name: Push_Image
+          Actions:
+            - Name: push_image_to_ECR_Repo
+              RunOrder: 4
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref rPushImageCodeBuildProject
+              Namespace: BuildVariables
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact    
+
+        - Name: ECS_Fargate_Deployment
+          Actions:
+            - Name: ECS_Automated_Deployment
+              RunOrder: 5
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: ECS
+                Version: '1'
+              Configuration:
+                  ClusterName: !Ref pEcsClusterName
+                  ServiceName: !Ref pEcsServiceName
+                  FileName: !Ref pEcsImageDefinitionFileName
+              Namespace: DeployVariables
+              InputArtifacts:
+                - Name: BuildArtifact    
+
+  rBuildandTagFailedBuildsAlarms:
+    Type: 'AWS::CloudWatch::Alarm'
+    Condition: cCreateFailedBuildsAlarmBuildAndTag
+    Properties:
+      AlarmActions:
+      - !Ref "pPriorityIncidentTopic"
+      AlarmDescription: 'Measures the number of builds that failed because of client error or a timeout.'
+      ComparisonOperator: !Ref pBuildAndTagFailedBuildsComparisonOperator
+      Dimensions:
+      - Name: ProjectName
+        Value: !Ref rBuildandTagCodeBuildProject
+      EvaluationPeriods: !Ref pBuildAndTagFailedBuildsEvaluationPeriods
+      MetricName: FailedBuilds
+      Namespace: 'AWS/CodeBuild'
+      Period: !Ref pBuildAndTagFailedBuildsPeriod
+      Statistic: !Ref pBuildAndTagFailedBuildsStatistic
+      Threshold: !Ref pBuildAndTagFailedBuildsThreshold
+
+  rPushImageBuildFailedBuildsAlarms:
+    Type: 'AWS::CloudWatch::Alarm'
+    Condition: cCreateFailedBuildsAlarmPushImage
+    Properties:
+      AlarmActions:
+      - !Ref "pPriorityIncidentTopic"
+      AlarmDescription: 'Measures the number of builds that failed because of client error or a timeout.'
+      ComparisonOperator: !Ref pPushImageFailedBuildsComparisonOperator
+      Dimensions:
+      - Name: ProjectName
+        Value: !Ref rPushImageCodeBuildProject
+      EvaluationPeriods: !Ref pPushImageFailedBuildsEvaluationPeriods
+      MetricName: FailedBuilds
+      Namespace: 'AWS/CodeBuild'
+      Period: !Ref pPushImageFailedBuildsPeriod
+      Statistic: !Ref pPushImageFailedBuildsStatistic
+      Threshold: !Ref pPushImageFailedBuildsThreshold    

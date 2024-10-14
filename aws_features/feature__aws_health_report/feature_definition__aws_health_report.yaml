@@ -1,0 +1,34 @@
+---
+# Feature Definition (FD) for AWSHealthReport
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AwsHealthReport
+FeatureParams:
+  pDXCSceduleForEventRule:
+    Type: "String" 
+    Default: 'cron(30 1 ? * * *)'
+    Description: 'Enter the Schedule in cron Format for Event Rule for Health Check.'
+  pCloudOpsAccountId:
+    Type: String
+    Default: 'None'
+    Description: 'Enter the Cloudops Account Id, example: 987654321067'
+  pCloudOpsAccountRegion:
+    Type: String
+    Default: 'None'
+    Description: 'Enter the Cloudops Account Region, example: sa-east-1'
+Version: '11.0.0.4'
+StandardCreationBatch: 1
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: 'This feature will perform the Health Checks on EC2 Instances and AWS services and generate the reports to S3 Bucket.' 
+AllowDisable: true
+ResourceDeployment:
+  - aws_health_report.yaml
+

@@ -1,0 +1,582 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'A regional CloudFormation Template for the CloudWatch_Agent_Failure which will perform the Diagnosis and Resolution activity.'
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/SelfhealCloudwatchAgentFailure/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCInstanceHealthSNSTopicArn:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Main/InstanceHealthMessageTopic
+    Description: SSM Parameter for SNS Topic Arn for Instance Health 
+  pCloudOpsEmailID:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Notification/DXCNotifyEmail
+    Description: SSM Parameter contains the CloudOps Email_Ids
+  pDXCSelfHealLambdaRoleName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: '/DXC/SelfHeal/LambdaExecutionRoleName'
+    Description: SSM Parameter contains the step function lambda role.
+  pDXCSelfHealSFNRole:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: '/DXC/SelfHeal/StepFunctionExecutionRoleName'
+    Description: SSM Parameter contains the step function execution role.
+  pSenderEmailID:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SelfHeal/SenderEmailId
+    Description: SSM Parameter contains the Sender Email_Ids
+  pDXCDefaultInstanceProfileArn:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: '/DXC/IAMResources/DefaultInstanceProfileArn'
+    Description: SSM Parameter contains Default Instance Profile Arn.
+  pSnowIncidentPriority:
+    Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor (can be updated if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3']
+
+Resources:
+
+  rDxcmsSHIAMPoliciesSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/SelfHeal/CW/IAMPolicies'
+      Type: String
+      Value: '[{"Policy_Name":"CloudWatchAgentServerPolicy","Policy_Type":"AWS managed"},{"Policy_Name":"CloudWatchLogsPolicy","Policy_Type":"Customer inline"},{"Policy_Name":"CloudWatchEventsPolicy","Policy_Type":"Customer inline"}]'
+      Description: Enter the required policy arns.  
+
+  rDxcmsSHCWInstanceHealthSNSTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Properties: 
+      Endpoint: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_sh_lam_wrapper_lam_to_trigger_sfn'
+      Protocol: lambda
+      TopicArn: !Ref pDXCInstanceHealthSNSTopicArn
+      Region: !Sub ${AWS::Region}
+
+  rDxcmsSHWrapperLamToTriggerCWSfnLAInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref pDXCInstanceHealthSNSTopicArn
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms_sh_lam_wrapper_lam_to_trigger_sfn'
+
+  rDxcmsSHCWIAMRoleIssueHanLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: iam_role_handler.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          DefaultIAMRoleArn: !Ref pDXCDefaultInstanceProfileArn
+          policy_names: !Ref rDxcmsSHIAMPoliciesSMParameter
+      Description: 'Lambda to Check and Fix the IAM Role issue.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/iam_role_handler.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_iam_role_handler'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsSHCWIAMRoleIssueHanCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWIAMRoleIssueHanLA
+
+  rDxcmsSHCWFetechInstanceDetailsLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: fetch_instance_details.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Description: 'Lambda to fetch instance details'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/fetch_instance_details.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_fetch_instance_details'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWFetechInstanceDetailsCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWFetechInstanceDetailsLA
+
+
+  rDxcmsSHCWCheckConfigFileLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: check_config_file.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Description: 'Lambda to check the CloudWatch Configuration files.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/check_config_file.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_check_config_file'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWCheckConfigFileCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWCheckConfigFileLA
+
+  rDxcmsSHCWConfigCWAgentLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: configure_cw_agent.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Description: 'Lambda to configure CloudWatch Agent.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/configure_cw_agent.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_configure_cw_agent'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWConfigCWAgentCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWConfigCWAgentLA
+
+  rDxcmsSHCWUpdateDynamoDbLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: update_dynamodb.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          table_name: 'Ft_Dxcms_SelfHeal'
+      Description: 'Lambda to update the DynamoDb table.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/update_dynamodb.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_update_dynamodb'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWUpdateDynamoDbCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWUpdateDynamoDbLA
+
+  rDxcmsSHCWStartCWAgentLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: start_cw_agent.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Description: 'Lambda to start the cloudwatch agent.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/start_cw_agent.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_start_cw_agent'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWStartCWAgentCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWStartCWAgentLA
+
+  rDxcmsSHCWTriggerSNSLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: trigger_sns.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          CloudOps_Email_ID: !Ref pCloudOpsEmailID
+          SNS_Topic_Arn: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dxcms_sh_sns_notification'
+      Description: 'Lambda to publish payload to sns topic.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/trigger_sns.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_trigger_sns'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWTriggerSNSCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWTriggerSNSLA
+
+  rDxcmsSHCWValidateCWIssueLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: validate_cw_issue.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Description: 'Lambda to Validate CloudWatch logs generation for an EC2 instance.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/validate_cw_issue.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_validate_cw_issue'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWValidateCWIssueCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWValidateCWIssueLA
+
+  rDxcmsSHCWTriggerNotificationSfnWErrorLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: trigger_notification_sfn_w_error.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Description: 'Lambda to trigger the notification sfn if states caught an error'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/trigger_notification_sfn_w_error.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_trigger_notification_sfn_w_error'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWTriggerNotificationSfnWErrorCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWTriggerNotificationSfnWErrorLA
+
+  rDxcmsSHCWTriggerSFNLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: trigger_step_function.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          notification_sfn_name: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_sfn_notification' 
+          resolution_sfn_name: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms_sh_cw_sfn_resolution'
+      Description: 'Lambda to trigger the step function.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/trigger_step_function.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_trigger_step_function'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWTriggerSFNCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWTriggerSFNLA
+
+  rDxcmsSHCWSendNotificationEmailLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: send_notification_email.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          CloudOpsEmailIds: '/DXC/Notification/DXCNotifyEmail'
+          SenderEmailId: '/DXC/SelfHeal/SenderEmailId'
+          MsTeamsChannelEmailId : '/DXC/SelfHeal/MsTeamsChannelEmailId'
+          table_name: 'Ft_Dxcms_SelfHeal'
+      Description: 'Lambda to send the notifications via email.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/send_notification_email.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_send_notification_email'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWSendNotificationEmailCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWSendNotificationEmailLA
+
+  rDxcmsSHCWSnowDescriptionInputLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: snow_description_input.lambda_handler
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealLambdaRoleName}'
+      Environment:
+        Variables:
+          table_name : 'Ft_Dxcms_SelfHeal'
+      Description: 'Lambda to form the description for snow incidents.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/snow_description_input.zip'
+      Runtime: python3.11
+      FunctionName: 'dxcms_sh_cw_snow_description_input'
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsSHCWSnowDescriptionInputCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsSHCWSnowDescriptionInputLA
+
+  rDxcmsSHCWAgentFailureDiagnosisSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms_sh_cw_sfn_diagnosis'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/dxcms_sh_cw_sfn_diagnosis/dxcms_sh_cw_sfn_diagnosis.json'
+      DefinitionSubstitutions:
+        CheckIAMRole: !GetAtt 
+          - rDxcmsSHCWIAMRoleIssueHanLA
+          - Arn          
+        FetchInstanceDetails: !GetAtt 
+          - rDxcmsSHCWFetechInstanceDetailsLA
+          - Arn
+        CheckCWAgentDetails: !GetAtt 
+          - rDxcmsSHCWCheckConfigFileLA
+          - Arn
+        DynamoDbLogging: !GetAtt
+          - rDxcmsSHCWUpdateDynamoDbLA
+          - Arn
+        TriggerResolutionSFN: !GetAtt
+          - rDxcmsSHCWTriggerSFNLA
+          - Arn
+        TriggerNotificationSfnWError: !GetAtt
+          - rDxcmsSHCWTriggerNotificationSfnWErrorLA
+          - Arn
+        NotifyForLambdaFunctionFailure: !GetAtt 
+          - rDxcmsSHCWTriggerSNSLA
+          - Arn
+      RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealSFNRole}'
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsSelfHealCWAgentFailureSFNCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL' 
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsSHCWAgentFailureResolutionSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms_sh_cw_sfn_resolution'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/dxcms_sh_cw_sfn_resolution/dxcms_sh_cw_sfn_resolution.json'
+      DefinitionSubstitutions:
+        RemediateIAMRoleIssue: !GetAtt 
+          - rDxcmsSHCWIAMRoleIssueHanLA
+          - Arn          
+        FetchInstanceDetails: !GetAtt 
+          - rDxcmsSHCWFetechInstanceDetailsLA
+          - Arn
+        RestartCWAgent: !GetAtt 
+          - rDxcmsSHCWStartCWAgentLA
+          - Arn
+        ReconfigureCWAgent: !GetAtt
+          - rDxcmsSHCWConfigCWAgentLA
+          - Arn
+        RestartValidate: !GetAtt
+          - rDxcmsSHCWValidateCWIssueLA
+          - Arn
+        ValidateCWIssue: !GetAtt 
+          - rDxcmsSHCWValidateCWIssueLA
+          - Arn
+        DynamoDbLogging: !GetAtt
+          - rDxcmsSHCWUpdateDynamoDbLA
+          - Arn
+        SendEmail: !GetAtt
+          - rDxcmsSHCWSendNotificationEmailLA
+          - Arn
+        SnowDescriptionInput: !GetAtt
+          - rDxcmsSHCWSnowDescriptionInputLA
+          - Arn
+        TriggerNotificationSFN: !GetAtt 
+          - rDxcmsSHCWTriggerSFNLA
+          - Arn
+        TriggerNotificationSfnWError: !GetAtt
+          - rDxcmsSHCWTriggerNotificationSfnWErrorLA
+          - Arn
+        NotifyForLambdaFunctionFailure: !GetAtt 
+          - rDxcmsSHCWTriggerSNSLA
+          - Arn
+      RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${pDXCSelfHealSFNRole}'
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsSelfHealCWAgentFailureSFNCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL' 
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsSelfHealCloudWatchAgentFailure
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsSelfHealCWAgentFailureSFNCWLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 60
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/vendedlogs/rDxcmsSelfHealCWAgentFailureSFNCWLogGroup"
+
+

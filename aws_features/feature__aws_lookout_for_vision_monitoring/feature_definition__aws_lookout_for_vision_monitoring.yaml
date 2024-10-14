@@ -1,0 +1,77 @@
+---
+# Feature Definition (FD) for AWSLookoutForVisionMonitoring
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AWSLookoutForVisionMonitoring
+Version: '9.0.0.2'
+StandardCreationBatch: 3
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creating the cloudwatch alarms for Lookout For Vision service in us-east-1, us-east-2, us-west-2, ap-northeast-2, ap-northeast-1, eu-central-1, eu-west-1 regions, as currently, it supports these regions.
+FeatureParams:
+  pCommonIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priroity fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+  pSupportedRegions:
+    Description: Regions that supports Lookout For Vision service, use comma seperation.
+    Type: String
+    Default: "us-east-1,us-east-2,us-west-2,ap-northeast-2,ap-northeast-1,eu-central-1,eu-west-1"
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+Alarms:
+  DetectedAnomalyCount_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: ModelVersion
+      Value: <TO BE FILLED>
+    - Name: ProjectName
+      Value: <TO BE FILLED>
+    EvaluationPeriods: 1
+    MetricName: DetectedAnomalyCount
+    Namespace: AWS/LookoutVision
+    Period: 300
+    Statistic: Sum
+    Threshold: 5
+
+  InvalidImageCount_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: ModelVersion
+      Value: <TO BE FILLED>
+    - Name: ProjectName
+      Value: <TO BE FILLED>
+    EvaluationPeriods: 1
+    MetricName: InvalidImageCount
+    Namespace: AWS/LookoutVision
+    Period: 300
+    Statistic: Sum
+    Threshold: 6
+  
+  ErrorCount_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: ModelVersion
+      Value: <TO BE FILLED>
+    - Name: ProjectName
+      Value: <TO BE FILLED>
+    EvaluationPeriods: 1
+    MetricName: ErrorCount
+    Namespace: AWS/LookoutVision
+    Period: 300
+    Statistic: Sum
+    Threshold: 5
+
+ResourceDeployment:
+  - aws_lookout_for_vision_monitoring.yaml
+DepensOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities

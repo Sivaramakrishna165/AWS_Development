@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Configuration of AWS Config service with exclusion'
+
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/SES/Module/ConfigServiceWithExclusion/S3AssetBucket
+    Description: SSM Parameter for bucket location
+
+  pFtConfServResourceListToSkip:
+    Description: 'List of AWS resource types to be excluded from AWS Config Recorder, comma-separated resource types should be added. No need of using inverted commas'
+    Type: String
+    Default: 'Blank'
+
+Resources:
+  rConfigServiceWithExclusionLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: 'LambdaExecution'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'iam:PassRole'
+                  - 'logs:CreateLogGroup'
+                  - 'logs:DescribeLogGroups'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:PutRetentionPolicy'
+                Resource:
+                  - "*"
+              - Effect: 'Allow'
+                Action:
+                  - 'config:PutConfigurationRecorder'
+                  - 'config:DescribeConfigurationRecorders'
+                  - 'config:StartConfigurationRecorder'
+                  - 'config:StopConfigurationRecorder'
+                  - 'dynamodb:GetItem'
+                Resource: '*'
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackName'
+        - Key: Name
+          Value: 'rConfigServiceWithExclusionLambdaRole'
+        - Key: Owner
+          Value: 'DXC'
+        - Key: Purpose
+          Value: 'ConfigureConfigServiceWithExclusion'
+
+  rConfigServiceWithExclusionLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub "dxcms-configservice-with-exclusion-${AWS::Region}"
+      Description: 'Lambda to update configservice using exclusion'
+      Runtime: python3.11
+      Handler: dxcms_configservice_with_exclusion.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt rConfigServiceWithExclusionLambdaRole.Arn
+      Environment:
+        Variables:
+          CONFIG_EXCLUSION_LIST: !Ref pFtConfServResourceListToSkip
+      Timeout: 900
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/configservice_with_exclusion.zip"
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackName'
+        - Key: Owner
+          Value: DXC
+
+
+  rConfigServiceWithExclusionLambdaCustom:
+    Type: 'AWS::CloudFormation::CustomResource'
+    Properties:
+      ServiceToken: !GetAtt rConfigServiceWithExclusionLambda.Arn
+      pFtConfServResourceListToSkip: !Ref pFtConfServResourceListToSkip

@@ -1,0 +1,227 @@
+{
+  "Comment": "An example of the Amazon States Language using a parallel state to execute two branches at the same time.",
+  "StartAt": "Parallel",
+  "States": {
+    "Parallel": {
+      "Type": "Parallel",
+      "Next": "SFN_output_processing",
+      "Branches": [
+        {
+          "StartAt": "perform_health_checks",
+          "States": {
+            "perform_health_checks": {
+              "Type": "Task",
+              "Resource": "${perform_health_checks}",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 20
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "perform_health_checks_error"
+                }
+              ],
+              "Next": "Wait_for_status_check"
+            },
+            "perform_health_checks_error": {
+              "Type": "Pass",
+              "Parameters": {
+                "Cause.$": "$.Cause",
+                "State.$": "$$.State",
+                "ErrorMessageFrom": "perform_health_checks Function"
+              },
+              "End": true
+            },
+            "Wait_for_status_check": {
+              "Type": "Wait",
+              "Seconds": 300,
+              "Next": "check_hc_ssm_command_status"
+            },
+            "check_hc_ssm_command_status": {
+              "Type": "Task",
+              "Resource": "${check_hc_ssm_command_status}",
+              "TimeoutSeconds": 300,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 20
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "check_hc_ssm_command_status_error"
+                }
+              ],
+              "Next": "Wait"
+            },
+            "check_hc_ssm_command_status_error": {
+              "Type": "Pass",
+              "Parameters": {
+                "Cause.$": "$.Cause",
+                "State.$": "$$.State",
+                "ErrorMessageFrom": "check_hc_ssm_command_status Function"
+              },
+              "End": true
+            },
+            "Wait": {
+              "Type": "Wait",
+              "Seconds": 600,
+              "Next": "check_command_status"
+            },
+            "check_command_status": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.Status",
+                  "StringEquals": "completed",
+                  "Next": "generate_health_check_report"
+                },
+                {
+                  "Variable": "$.Status",
+                  "StringEquals": "pending",
+                  "Next": "Check_count"
+                }
+              ]
+            },
+            "Check_count": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.Count",
+                  "NumericEquals": 0,
+                  "Next": "terminate_hc_ssm_command"
+                },
+                {
+                  "Variable": "$.Count",
+                  "NumericGreaterThan": 0,
+                  "Next": "Wait_for_trigger_statuscheck"
+                }
+              ]
+            },
+            "Wait_for_trigger_statuscheck": {
+              "Type": "Wait",
+              "Seconds": 600,
+              "Next": "check_hc_ssm_command_status"
+            },
+            "generate_health_check_report": {
+              "Type": "Task",
+              "Resource": "${generate_health_check_report}",
+              "TimeoutSeconds": 300,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 20
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "generate_health_check_report_error"
+                }
+              ],
+              "End": true
+            },
+            "generate_health_check_report_error": {
+              "Type": "Pass",
+              "Parameters": {
+                "Cause.$": "$.Cause",
+                "State.$": "$$.State",
+                "ErrorMessageFrom": "generate_health_check_report Function"
+              },
+              "End": true
+            },
+            "terminate_hc_ssm_command": {
+              "Type": "Task",
+              "Resource": "${terminate_hc_ssm_command}",
+              "TimeoutSeconds": 300,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "IntervalSeconds": 3,
+                  "BackoffRate": 2,
+                  "MaxAttempts": 20
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.DataLimitExceeded",
+                    "States.Runtime",
+                    "States.TaskFailed",
+                    "States.Permissions",
+                    "States.Timeout",
+                    "Lambda.Unknown"
+                  ],
+                  "Next": "generate_health_check_report"
+                }
+              ],
+              "Next": "generate_health_check_report"
+            }
+          }
+        },
+        {
+          "StartAt": "Pass",
+          "States": {
+            "Pass": {
+              "Type": "Pass",
+              "Parameters": {
+                "Input.$": "$",
+                "Execution.$": "$$.Execution.Id",
+                "StateMachine.$": "$$.StateMachine"
+              },
+              "End": true
+            }
+          }
+        }
+      ]
+    },
+    "SFN_output_processing": {
+      "Type": "Task",
+      "Resource": "${SFN_output_processing}",
+      "End": true
+    }
+  }
+}

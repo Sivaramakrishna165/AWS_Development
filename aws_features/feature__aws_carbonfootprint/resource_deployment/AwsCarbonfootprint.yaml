@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creating a template which creates a lambda function which will retreive the carbon footprint report of target account.
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/AwsCarbonfootprint/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+  pSESLayerArn:
+    Description: "SSM parameter for Lambda Layer ARN"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/SES/SESLayerLambdaArn
+  pCarbonFootprintTargetAccountPolicyName:
+    Type: String
+    Default: ""
+    Description: Provide a customer managed policy name which assume a role consists of target accountId attached in IAM Resource section.  
+  pCarbonFootprintSESMailingPolicyName:
+    Type: String
+    Default: ""
+    Description: Provide a customer managed policy name which is assuming mailing based action to send emails to end users.
+  pTargetAccountId:
+    Type: String
+    Default: ""
+    Description: Provide the target account Id of which you need to view the carbon footprint report.
+  pTargetAccountRoleName:
+    Type: String
+    Default: ""
+    Description: Provide the target account role name which is created in the target account.
+  pSourceRegionName:
+    Type: String
+    Default: ""
+    Description: Provide the source region code where you want to create S3 bucket. Ex - us-west-2 etc.  
+  pS3BucketNametoUploadReportinSourceAccount:
+    Type: String
+    Default: ""
+    Description: Provide the S3 bucket name where the carbon footprint report (.json) will be uploaded to similar location like - <accountId>/<ccft_<accountId>_yymm.json>
+  pSenderEmailAddress:
+    Type: String
+    Default: ""
+    Description: Provide a sender email address from where recipient will get email address.
+  pRecipientEmailAddress:
+    Type: String
+    Default: ""
+    Description: Provide a recipient email address to receive carbon footprint report. 
+
+Resources:
+  rCarbonFootprintTargetAccountPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Ref pCarbonFootprintTargetAccountPolicyName
+      Description: Policy which assumes a role consists of target accountId
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PolicyAssumingRoleForTargetAccountId
+            Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource: !Sub "arn:aws:iam::${pTargetAccountId}:role/${pTargetAccountRoleName}" 
+      Roles:
+        - !Ref rCarbonFootprintLambdaRole
+  
+  rCarbonFootprintSESMailingPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Ref pCarbonFootprintSESMailingPolicyName
+      Description: Policy which assumes mailing based action to send emails to end users
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SendingSESEmailReportstoEndUsers
+            Effect: Allow
+            Action:
+              - ses:VerifyEmailIdentity
+              - ses:SendRawEmail
+              - ses:SetIdentityNotificationTopic
+              - ses:GetIdentityVerificationAttributes
+              - ses:ListIdentities
+              - ses:VerifyDomainIdentity
+              - ses:VerifyEmailAddress
+            Resource: "*"
+      Roles:
+        - !Ref rCarbonFootprintLambdaRole
+
+  rCarbonFootprintLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  rCarbonFootprintReportGenerationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: dxcms_aws_carbonfootprint_report_generation.lambda_handler
+      MemorySize: 128
+      Timeout: 120
+      Layers:
+        - !Ref pSESLayerArn
+      Role: !GetAtt rCarbonFootprintLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/dxcms_aws_carbonfootprint_report_generation.zip"
+      Environment:
+        Variables:
+          CcftRoleName: !Ref pTargetAccountRoleName
+          TargetAccountId: !Ref pTargetAccountId
+          SourceRegionName: !Ref pSourceRegionName  
+          S3BucketName: !Ref pS3BucketNametoUploadReportinSourceAccount
+          SenderEmailAddress: !Ref pSenderEmailAddress
+          RecipientEmailAddress: !Ref pRecipientEmailAddress
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+      - Key: Purpose
+        Value: AWS Carbonfootprint Report Generation and mail that to end users
+
+  rPermissionForEventsToInvokeCarbonFootprintLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref rCarbonFootprintReportGenerationLambda
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - rCarbonFootprintEventRule
+          - Arn
+
+  rCarbonFootprintEventRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Event that triggers the function CarbonfootprintReportGenerationLambda in 1st of every month"
+      ScheduleExpression: "cron(0 10 1 * ? *)"
+      Targets:
+        - Arn: !GetAtt rCarbonFootprintReportGenerationLambda.Arn
+          Id: "CarbonFootprintLambdaExecRule"          

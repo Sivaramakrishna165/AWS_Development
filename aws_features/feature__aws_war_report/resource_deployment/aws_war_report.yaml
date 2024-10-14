@@ -1,0 +1,490 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'A template which genearets war report'
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/AWSWarReport/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'none'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCScheduleExpression:
+    Type: String
+    Default: cron(0 12 1 * ? *)
+    Description : Give the Schedule time based on the default one
+  pDXCCloudOpsS3Bucket:
+    Type: String
+    Default: cloudops-war-reports
+    Description: 'Enter the Cloudops Bucket for storing the reports, example: cloudopsbucket'
+  pSenderEmailID:
+    Type: String
+    Description: sender mail id for notification
+  pReceiverEmailID:
+    Type: String
+    Description: receiver mail id for notification
+  
+Resources: 
+
+  rDxcmsWARSNSTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    Properties: 
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsWARSNSTopic
+      - Key: Owner
+        Value: DXC
+      TopicName: dxcms-aws-war-sns-notification
+
+  rDxcmsWARCloudOpsSenderEmailIDSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/AWS-WAR-REPORT/SenderEmailId'
+      Type: String
+      Value: !Ref pSenderEmailID
+      Description: 'SSM Parameter contains the Cloudops EmailId'
+
+  rDxcmsWARCloudOpsEmailIDSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/AWS-WAR-REPORT/CloudOpsEmailIds'
+      Type: String
+      Value: !Ref pReceiverEmailID
+      Description: 'SSM Parameter contains the Cloudops EmailId'
+
+  rDxcmsWARCloudOpsS3BucketSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/AWS-WAR-REPORT/S3Bucket'
+      Type: String
+      Value: !Ref  pDXCCloudOpsS3Bucket
+      Description: 'SSM Parameter contains the Cloudops S3 Bucket.'
+
+  rDxcmsWARReportScheduleRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Name: !Sub dxcms-aws-war-report-schedule-rule-${AWS::Region}
+      Description: WARReportScheduleRule
+      ScheduleExpression: !Ref pDXCScheduleExpression
+      State: DISABLED
+      Targets: 
+        - 
+          Arn: !GetAtt
+            - rDxcmsWARCreatingWARReportSFN
+            - Arn
+          Id: StepfunctionRule
+          RoleArn: !GetAtt 
+            - rDxcmsEventBridgeIAMrole
+            - Arn
+
+  rDxcmsEventBridgeIAMrole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Sub 'dxcms-aws-war-event-rule-exec-role-${AWS::Region}'
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: !Sub events.amazonaws.com
+              Action: 'sts:AssumeRole'
+        Path: /
+        Policies:
+          - PolicyName: eventbridgepolicy
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - states:StartExecution
+                  Resource:
+                    - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms-*'
+
+  rDxcWARLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: !Sub dxcms-aws-war-lambda-exec-role-${AWS::Region}
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcWARLambdaExecutionRole
+      - Key: Owner
+        Value: DXC
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: "/"
+      Policies:
+        - PolicyName: Dxc-aws-war-lambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+
+            - Sid: 'SNSAccessPermission'
+              Effect: Allow
+              Action:
+              - sns:ListTopics
+              - sns:ListSubscriptions
+              - sns:CreatePlatformEndpoint
+              - sns:SetTopicAttributes
+              - sns:Publish
+              - sns:Subscribe
+              - sns:ConfirmSubscription
+              - sns:CreateTopic
+              - sns:GetSubscriptionAttributes
+              - sns:GetEndpointAttributes
+              - sns:SetSubscriptionAttributes
+              - sns:ListSubscriptionsByTopic
+              Resource: 
+              - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dxcms-war-sns-notification'
+
+            - Sid: S3bucketaccess
+              Action:
+              - s3:CreateBucket
+              - s3:GetObjectAcl
+              - s3:GetBucketNotification
+              - s3:ListMultipartUploadParts
+              - s3:PutObject
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:GetBucketVersioning
+              - s3:ListAllMyBuckets
+              - s3:GetBucketLocation
+              - s3:GetObjectVersion
+              Effect: Allow
+              Resource: "*"
+
+            - Sid: 'SESAccessPermission'
+              Effect: Allow
+              Action: 
+              - ses:SendRawEmail
+              - ses:GetIdentityVerificationAttributes
+              Resource: "*"
+
+            - Sid: SSMParamteraccess
+              Action:
+              - ssm:GetParameter
+              Effect: Allow
+              Resource: "*"
+
+            - Sid: Stepfunctionaccess
+              Action:
+              - states:StartExecution
+              - states:DescribeExecution
+              - states:StopExecution
+              - states:SendTaskSuccess
+              - states:SendTaskFailure
+              - states:DescribeStateMachine
+              - states:ListStateMachines
+              Effect: Allow
+              Resource:
+              - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms-war*'
+            
+            - Sid: ec2access
+              Action:
+              - ec2:DescribeRegions
+              Effect: Allow
+              Resource: "*"
+            
+            - Sid: IAMaccess
+              Action:
+              - iam:ListAccountAliases
+              Effect: Allow
+              Resource: "*"
+            
+            - Sid: WARaccess
+              Action:
+              - wellarchitected:GetAnswer
+              - wellarchitected:GetLensReview
+              - wellarchitected:GetWorkload
+              - wellarchitected:ListAnswers
+              - wellarchitected:ListLensReviews
+              - wellarchitected:ListMilestones
+              - wellarchitected:ListWorkloadShares
+              - wellarchitected:ListWorkloads
+              - wellarchitected:ListLenses
+              Effect: Allow
+              Resource: "*"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcWARLambdaExecutionRole
+      - Key: Owner
+        Value: DXC  
+
+  rDxcmsWARStateMachineExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'dxcms-aws-war-sfn-exec-role-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'states.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: !Sub 'dxcms-aws-sf-statemachine-${AWS::Region}'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+
+              - Sid: lambdainvokeaccess
+                Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource: 
+                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dxcms-*'
+
+              - Sid: 'StateMachineExecution'
+                Effect: Allow
+                Action:
+                  - states:StartExecution
+                  - states:DescribeExecution
+                  - states:StopExecution
+                Resource: 
+                  - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms-*'
+                      
+              - Sid: 'CloudWatchLogs'
+                Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:GetLogEvents
+                  - logs:PutLogEvents
+                  - logs:UpdateLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutRetentionPolicy
+                  - logs:CreateLogGroup
+                Resource: '*'
+              
+              - Sid: 'SNSPermission'
+                Effect: Allow
+                Action:
+                - sns:CreatePlatformEndpoint
+                - sns:SetTopicAttributes
+                - sns:UntagResource
+                - sns:Publish
+                - sns:Subscribe
+                - sns:ConfirmSubscription
+                - sns:CreateTopic
+                - sns:GetSubscriptionAttributes
+                - sns:ListSubscriptions
+                - sns:GetEndpointAttributes
+                - sns:SetSubscriptionAttributes
+                Resource: 
+                - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:dxcms-war*'
+
+              - Sid: 'eventbridge'
+                Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                Resource: !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForStepFunctionsExecutionRule'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsWARStateMachineExecutionRole
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsWARDeploymentEmailLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: deployment-email-notification.lambda_handler
+      Role: !GetAtt 
+        - rDxcWARLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          cloudOpsEmailId: '/DXC/Notification/DXCNotifyEmail'
+          SenderEmailId: '/DXC/Notification/DXCNotifyEmail'
+      Description: 'Lambda to trigger the notification for notifying the manual pre-requisites'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/deployment-email-notification.zip'
+      Runtime: python3.11
+      FunctionName: !Sub dxcms-aws-war-deployment-email-notification-${AWS::Region}
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: !Sub dxcms-aws-war-deployment-email-notification-${AWS::Region}
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsWARTriggerSNSLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: trigger-sns.lambda_handler
+      Role: !GetAtt 
+        - rDxcWARLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          CloudOps_Email_Parameter: !Ref rDxcmsWARCloudOpsEmailIDSSMParameter
+          SNS_Topic_Arn: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:dxcms-war-sns-notification'
+      Description: 'Lambda to publish payload to sns topic.'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/trigger-sns.zip'
+      Runtime: python3.11
+      FunctionName: !Sub dxcms-aws-war-trigger-sns-${AWS::Region}
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsWARTriggerSNSLA
+      - Key: Owner
+        Value: DXC
+          
+  rDxcmsWARTriggerSNSLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcmsWARTriggerSNSLA
+
+  rDxcGenerateWARReportLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: generate-war-report.lambda_handler
+      Role: !GetAtt 
+        - rDxcWARLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          target_S3_bucket_parameter: !Ref rDxcmsWARCloudOpsS3BucketSSMParameter
+          customer_name_parameter: /DXC/Main/CustomerName
+      Description: 'Lambda to generate the war report'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/generate-war-report.zip'
+      Runtime: python3.11
+      FunctionName: !Sub dxcms-aws-war-generate-report-${AWS::Region}
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcGenerateWARReportLA
+      - Key: Owner
+        Value: DXC
+
+  rDxcGenerateWARReportCWLG:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/lambda"
+          - !Ref rDxcGenerateWARReportLA
+
+  rDxcmsWARExecutionEmailLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: execution-email-notification.lambda_handler
+      Role: !GetAtt 
+        - rDxcWARLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          SenderEmailId: !Ref rDxcmsWARCloudOpsSenderEmailIDSSMParameter
+          cloudOpsEmailId: !Ref rDxcmsWARCloudOpsEmailIDSSMParameter
+      Description: 'Lambda to send the notifications to users'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/execution-email-notification.zip'
+      Runtime: python3.11
+      FunctionName: !Sub dxcms-aws-war-execution-email-notification-${AWS::Region}
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsWARExecutionEmailLA
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsWARCreatingWARReportSFN:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: 'dxcms-aws-war-creating-reporting'
+      DefinitionS3Location:
+        Bucket: !Ref pDXCS3BucketName
+        Key: !Sub '${pDXCS3KeyPrefix}/creating-war-report/creating-war-report.json'
+      DefinitionSubstitutions:
+        creating_war_report: !GetAtt 
+          - rDxcGenerateWARReportLA
+          - Arn
+        generate_email_notification: !GetAtt
+          - rDxcmsWARExecutionEmailLA
+          - Arn          
+        NotifyForLambdaFunctionFailure: !GetAtt 
+          - rDxcmsWARTriggerSNSLA
+          - Arn
+      RoleArn: !GetAtt 
+        - rDxcmsWARStateMachineExecutionRole
+        - Arn  
+      LoggingConfiguration:
+        Destinations:
+            - CloudWatchLogsLogGroup:
+                LogGroupArn: !GetAtt [ rDxcmsWARReportFailureSFNSFNCWLogGroup, Arn ]
+        IncludeExecutionData: true
+        Level: 'ALL' 
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsWARCreatingWARReportSFN
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsWARReportFailureSFNSFNCWLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 90
+      LogGroupName: !Join
+        - "/"
+        - - "/aws/vendedlogs/rDxcmsWARReportFailureSFNSFNCWLogGroup"
+
+  customInvokeDeploymentEmailLambda:
+    Type: Custom::AwsLambdaNotifyManlualPrerequisites
+    DependsOn: rDxcmsWARDeploymentEmailLA
+    Properties:
+        ServiceToken: !GetAtt rDxcmsWARDeploymentEmailLA.Arn

@@ -1,0 +1,89 @@
+{
+    "Comment": "EDR source StateMachine",
+    "StartAt": "StateMachineInstallReplAgent",
+    "States": {
+      "StateMachineInstallReplAgent": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+        "TimeoutSeconds": 900,
+        "HeartbeatSeconds": 700,
+        "Parameters": {
+          "FunctionName": "${StateMachineInstallReplAgent}:$LATEST",
+          "Payload": {
+            "InstanceId.$": "$.InstanceId",
+            "OSName.$": "$.OSName",
+            "RecoveryRegion.$": "$.RecoveryRegion",
+            "TaskToken.$": "$$.Task.Token"                  
+          }
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException"
+            ],
+            "IntervalSeconds": 2,
+            "MaxAttempts": 6,
+            "BackoffRate": 2
+          }
+        ],
+        "Catch": [ {
+            "ErrorEquals": [ "States.TaskFailed" ],
+            "Next": "StateMachineNotifyReplicationStatus"
+        } ],              
+        "Next": "StateMachineUpdateReplicationLaunchTemplate"
+      },
+      "StateMachineUpdateReplicationLaunchTemplate": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+        "TimeoutSeconds": 900,
+        "HeartbeatSeconds": 700,
+        "Parameters": {
+          "FunctionName": "${StateMachineUpdateReplicationLaunchTemplate}:$LATEST",
+          "Payload": {
+            "InstanceId.$": "$.InstanceId",
+            "OSName.$": "$.OSName",
+            "RecoveryRegion.$": "$.RecoveryRegion",
+            "TaskToken.$": "$$.Task.Token"
+          }
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException"
+            ],
+            "IntervalSeconds": 2,
+            "MaxAttempts": 6,
+            "BackoffRate": 2
+          }
+        ],
+        "Catch": [ {
+            "ErrorEquals": [ "States.TaskFailed" ],
+            "Next": "StateMachineNotifyReplicationStatus"
+        } ],                
+        "Next": "StateMachineNotifyReplicationStatus"
+      },
+      "StateMachineNotifyReplicationStatus": {
+        "Type": "Task",
+        "Resource":  "${StateMachineNotifyReplicationStatus}",
+        "TimeoutSeconds": 900,
+        "HeartbeatSeconds": 700,
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "Lambda.ServiceException",
+              "Lambda.AWSLambdaException",
+              "Lambda.SdkClientException"
+            ],
+            "IntervalSeconds": 2,
+            "MaxAttempts": 6,
+            "BackoffRate": 2
+          }
+        ],
+        "End": true
+      }
+    }
+  }

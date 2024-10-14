@@ -1,0 +1,47 @@
+---
+# Feature Definition (FD) for DetectCFTDrift
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: DetectCftDrift
+Version: '9.0.0.5'
+StandardCreationBatch: 3
+EnableFeature: true
+FeatureParams:
+  pDriftDetectCWFrequency:
+    Description: '[Required] Keep 1 days. The schedule (Rate) to trigger Detect CFT Drift (Change only if required)'
+    Type: String
+    Default: 'rate(1 day)'
+    AllowedValues: ['rate(1 day)', 'rate(3 days)', rate(7 days), rate(15 days), 'rate(30 days)']
+  pDetectDriftIncidentsPriority:
+    Description: '[DO NOT CHANGE] Priority of the Drift Incidents in ServiceNow'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1','2','3','4','5']
+  pNotifyEmail:
+    Description: '[Leave blank if notification not required] Email ID to recieve the drifted cfts information.'
+    Type: String
+    Default: 'user@example.com'
+  pWhiteListCFTs:
+    Description: 'Provide the CF StackNames to ignore drift detection.(with comma seperated) eg: testtemplate1, testtemplate2'
+    Type: String
+    Default: ''
+  pWhiteListResources:
+    Description: 'Provide the PhysicalResourceIds to ignore drift detection.(with comma seperated) eg: testresource1, testresource2'
+    Type: String
+    Default: ''
+  pComSnowInputTopic:
+    Description: 'ssm parameter for servicenow sns topic' 
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/SES/Module/CommonServicenow/ComSnowStdInputArn"
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Detect the drifts on the Cloudformations available in the region and raise a incident is service-now
+AllowDisable: true
+ResourceDeployment:
+  - detect_cft_drift.yaml

@@ -1,0 +1,483 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: DXC Managed Services - Security Hub Reporting
+
+Parameters:
+
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/SecurityhubReporting/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+
+  pPlatformVersion:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Main/pPlatformVersion
+    Description: "[DO NOT CHANGE] SSM Parameter for platform version"
+
+  pGlacierRetention:
+    Description: Number of days to retain logs in Glacier (Minimum 90)
+    Type: Number
+    Default: 2555
+    MinValue: 90
+
+  pTransitionDays:
+    Description: Number of days to retain logs before archiving to Glacier
+    Type: Number
+    Default: 90
+
+Conditions:
+    IsGovCloud: !Equals [ us-gov-west-1, !Ref 'AWS::Region' ]     
+
+Resources:
+
+  rSecurityHubReportingBucket:
+    Type: AWS::S3::Bucket  
+    DependsOn: 
+      - rBucketPermission
+      - rLambdaSortFindings
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: LogDeliveryWrite
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: ObjectWriter
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Function: !GetAtt rLambdaSortFindings.Arn
+            Event: 's3:ObjectCreated:*'
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: raw/firehose/
+      LifecycleConfiguration:
+        Rules:
+          - Id: Transition90daysRetain7yrs
+            Status: Enabled
+            ExpirationInDays: !Ref pGlacierRetention
+            Transition:
+              TransitionInDays: !Ref pTransitionDays
+              StorageClass: GLACIER
+          - Id: DeleteRawFiles
+            Prefix: /raw/
+            Status: Enabled
+            ExpirationInDays: '15'
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Owner
+          Value: DXC
+        - Key: Purpose
+          Value: To Store the Security Hub reports
+
+  pSecHubRepBucketParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Value: "0"
+      Description: Security Hub Reporting bucket.
+      Name: /DXC/sechubexport/bucket
+
+  rSecurityHubReportingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: rSecurityHubReportingBucket
+    Properties:
+      Bucket: !Ref rSecurityHubReportingBucket
+      PolicyDocument:
+        Statement:
+          - Sid: Allow Lambda upload
+            Action:
+              - s3:GetObject*
+              - s3:ListBucket
+              - s3:Put*
+              - s3:ListMultipartUploadParts
+              - s3:ListBucketMultipartUploads
+            Effect: Allow
+            Principal:
+              AWS:
+                - Fn::GetAtt:
+                    - rSecHubHistRepLambdaRole
+                    - Arn
+                - Fn::GetAtt:
+                    - rFirehoseDeliveryRole
+                    - Arn
+            Resource:
+              - Fn::GetAtt:
+                  - rSecurityHubReportingBucket
+                  - Arn
+              - Fn::Join:
+                  - ""
+                  - - Fn::GetAtt:
+                        - rSecurityHubReportingBucket
+                        - Arn
+                    - /*
+          - Sid: Enforce HTTPS Connections
+            Action: s3:*
+            Effect: Deny
+            Principal: '*'
+            Resource: !Sub
+              - arn:${Partition}:s3:::${rSecurityHubReportingBucket}/*
+              - { Partition: !If [ IsGovCloud, aws-us-gov, aws ] }
+            Condition:
+                Bool:
+                  aws:SecureTransport: false
+          - Sid: Restrict Delete* Actions
+            Action: s3:Delete*
+            Effect: Deny
+            Principal: '*'
+            Resource: !Sub
+              - arn:${Partition}:s3:::${rSecurityHubReportingBucket}/*
+              - { Partition: !If [ IsGovCloud, aws-us-gov, aws ] }
+          - Sid: DenyUnEncryptedObjectUploads
+            Effect: Deny
+            NotPrincipal:
+              Service: 
+                - firehose.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub
+              - arn:${Partition}:s3:::${rSecurityHubReportingBucket}/*
+              - { Partition: !If [ IsGovCloud, aws-us-gov, aws ] }
+            Condition:
+                StringNotEquals:
+                  s3:x-amz-server-side-encryption: AES256
+
+  pSecHubCountParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Value: "0"
+      Description: The Count for Security Hub Historical findings.
+      Name: /DXC/sechubexport/count
+
+
+  rSecHubHistRepLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Join ["-", ["SecHubHistRepLambdaRole", !Ref "AWS::Region"]]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: !Join ["-", ["SecHubHistRepLambdaRolePolicy", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-SecHubHistRepLambda*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxc-awsms-SecHubHistRepLambda*:log-stream:*'
+
+  pLambdaGetSHHIstFindingManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action: securityhub:Get*
+            Effect: Allow
+            Resource: "*"
+            Sid: GetSHFinding
+          - Action:
+              - ssm:GetParameter
+              - ssm:PutParameter
+            Effect: Allow
+            Resource:
+              Fn::Join:
+                - ""
+                - - "arn:"
+                  - Ref: AWS::Partition
+                  - ":ssm:"
+                  - Ref: AWS::Region
+                  - ":"
+                  - Ref: AWS::AccountId
+                  - :parameter
+                  - Ref: pSecHubCountParameter
+            Sid: SSMAllow
+          - Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+            Effect: Allow
+            Resource: "*"
+            Sid: EC2Allow
+          - Action:
+              - s3:GetObject
+              - s3:Put*
+              - s3:ListBucket
+              - s3:ListMultipartUploadParts
+              - s3:ListBucketMultipartUploads
+            Effect: Allow
+            Resource: 
+              - !Sub
+                - 'arn:aws:s3:::${BucketName}/*'
+                - { BucketName: !Ref rSecurityHubReportingBucket }
+              - !Sub 
+                - 'arn:aws:s3:::${BucketName}*'
+                - { BucketName: !Ref rSecurityHubReportingBucket }
+
+            Sid: S3Allow
+        Version: "2012-10-17"
+      Description: Get Security Hub Historic Findings
+      ManagedPolicyName: !Join ["-", ["lambdaGetSHHistFindingManagedPolicy", !Ref "AWS::Region"]]
+      Path: /
+      Roles:
+        - Ref: rSecHubHistRepLambdaRole
+
+  rSecHubHistRepLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ["-", ["dxc-awsms-SecHubHistRepLambda", !Ref "AWS::Region"]]
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sechub_reporting.zip" 
+      Environment:
+        Variables:
+          REGION:
+            Ref: AWS::Region
+          S3_BUCKET:
+            Ref: rSecurityHubReportingBucket
+          SSM_PARAMETER_COUNT:
+            Ref: pSecHubCountParameter
+      Handler: sechub_histfindings.lambda_handler
+      MemorySize: 256
+      Role: !GetAtt rSecHubHistRepLambdaRole.Arn
+      Runtime: python3.11
+      Timeout: 900
+      Tags:
+        - Key: Owner
+          Value: DXC
+        - Key: Purpose
+          Value: "SecHub_Historical_Findings"
+
+  rSecHubHistRepLambdaCustom:
+    Type: 'AWS::CloudFormation::CustomResource'
+    DependsOn: rSecurityHubReportingBucketPolicy
+    Version: '1.0'
+    Properties:
+      ServiceToken: !GetAtt rSecHubHistRepLambda.Arn
+
+  rBucketPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref rLambdaSortFindings
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+
+  rSecurityHubCloudWatchEvent:
+    DependsOn:
+      - rSecurityHubFirehose
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Description: String
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.securityhub
+        detail-type:
+          - Security Hub Findings - Imported
+      Targets:
+        - Arn:
+            'Fn::GetAtt':
+              - rSecurityHubFirehose
+              - Arn
+          Id: FirehoseStream
+          RoleArn: !GetAtt rSecurityHubLogDeliveryRole.Arn
+  
+  rSecurityHubLogDeliveryRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: 'AllowSecurityHubLogDelivery'
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: !Join ["-", ["securityhub_log_delivery_policy", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'firehose:PutRecord'
+                  - 'firehose:PutRecordBatch'
+                Resource:
+                  - !GetAtt rSecurityHubFirehose.Arn
+    
+  rSecurityHubFirehose:
+    DependsOn:
+      - rSecurityHubFirehoseDeliveryPolicy
+      - rSecurityHubReportingBucket
+    Type: 'AWS::KinesisFirehose::DeliveryStream'
+    Properties:
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !Join 
+          - ''
+          - - 'arn:aws:s3:::'
+            - !Ref rSecurityHubReportingBucket
+        BufferingHints:
+          IntervalInSeconds: '900'
+          SizeInMBs: '128'
+        CompressionFormat: UNCOMPRESSED
+        Prefix: raw/firehose/
+        RoleARN: !GetAtt rFirehoseDeliveryRole.Arn
+        CloudWatchLoggingOptions: 
+          Enabled: True
+          LogGroupName: !Join
+            - ''
+            - - '/aws/kinesisfirehose/'
+              - 'SecurityhubReporting'
+          LogStreamName: SecurityhubReporting
+
+
+
+  rFirehoseDeliveryRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: 'AllowFirehoseDelivery'
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+  
+  rSecurityHubFirehoseDeliveryPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Join ["-", ["firehose_delivery_policy", !Ref "AWS::Region"]]
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:AbortMultipartUpload'
+              - 's3:GetBucketLocation'
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:ListBucketMultipartUploads'
+              - 's3:PutObject'
+            Resource:
+              - !Join 
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref rSecurityHubReportingBucket
+              - !Join 
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref rSecurityHubReportingBucket
+                  - '*'
+              - !Join 
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref rSecurityHubReportingBucket
+                  - '/*'
+      Roles:
+        - !Ref rFirehoseDeliveryRole
+  
+  rLambdaSortRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSLambdaExecute'
+  rLambdaSortRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - s3:GetObject
+              - s3:Put*
+              - s3:ListBucket
+              - s3:ListMultipartUploadParts
+              - s3:ListBucketMultipartUploads
+            Effect: Allow
+            Resource: 
+              - !Sub
+                - 'arn:aws:s3:::${BucketName}/*'
+                - { BucketName: !Ref rSecurityHubReportingBucket }
+              - !Sub 
+                - 'arn:aws:s3:::${BucketName}*'
+                - { BucketName: !Ref rSecurityHubReportingBucket }
+
+            Sid: S3Allow
+        Version: "2012-10-17"
+      Description: Get Security Hub Findings
+      ManagedPolicyName: !Join ["-", ["LambdaSortRolePolicy", !Ref "AWS::Region"]]
+      Path: /
+      Roles:
+        - Ref: rLambdaSortRole
+
+  rLambdaSortFindings:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join ["-", ["dxc-awsms-SecHubReportingLambda", !Ref "AWS::Region"]]
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/sechub_reporting.zip" 
+      Handler: sechub_reporting.lambda_handler
+      Description: Function sorts findings by AWS account id/product/region
+      MemorySize: 256
+      Role: !GetAtt rLambdaSortRole.Arn
+      Runtime: python3.11
+      Timeout: 900
+      Tags:
+        - Key: Owner
+          Value: DXC
+        - Key: Purpose
+          Value: "SecHub_Findings"
+
+Outputs:
+  S3BucketName:
+    Description: Name of the bucket used for storing logs
+    Value: !Ref rSecurityHubReportingBucket

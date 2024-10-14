@@ -1,0 +1,27 @@
+---
+# Feature Definition (FD) for the AWS Health Events feature
+# This is a feature that to create AWS Config Service with Exclusion
+# Partition Key = Feature
+# No sort key needed
+
+Feature: ConfigServiceWithExclusion
+Version: '11.0.0.1'
+StandardCreationBatch: 2
+EnableFeature: false
+FeatureParams:
+  pFtConfServResourceListToSkip:
+    Description: 'List of AWS resource types to be excluded from AWS Config Recorder, comma-separated resource types should be added. No need of using inverted commas'
+    Type: String
+    Default: 'Blank'
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: AWS Config service with exclusion as a feature to update the existing configuration recorder
+AllowDisable: true
+ResourceDeployment:
+  - ConfigWithExclusion.yaml
+DependsOnFeature:
+  - ConfigService

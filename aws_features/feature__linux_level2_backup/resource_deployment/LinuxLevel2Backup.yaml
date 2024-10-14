@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Linux Level 2 Snapshot Document v1"
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+Resources:
+  rLinuxLevel2SnapshotDoc:
+      Type: 'AWS::SSM::Document'
+      Properties:
+        DocumentType: 'Command'
+        Content: 
+          schemaVersion: "2.2"
+          description: "Linux Level 2 Backup Document"
+          parameters:
+            instanceTags:
+              type: "String"
+              description: "SnapShot Tags"
+            osName :
+              type: "String"
+              description: "OS Name"
+          mainSteps:
+          - action: "aws:runShellScript"
+            name: "LinuxLevel2Backup"
+            inputs:
+              runCommand:
+                - "#!/bin/bash"
+                # Assume everything's good until it's not.
+                - EXIT_STATUS=0
+                - FILESYSTEM_CONSISTENT='true'
+                - NUM_FROZEN=0
+                - NUM_THAWED=0
+                - "TOKEN=`curl -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 600'`"
+                - "instance=`curl -H 'X-aws-ec2-metadata-token: '$TOKEN -v 'http://169.254.169.254/latest/meta-data/instance-id'`"
+                - "region=`curl -H 'X-aws-ec2-metadata-token: '$TOKEN -v 'http://169.254.169.254/latest/meta-data/placement/availability-zone'`"
+                - "root=`curl -H 'X-aws-ec2-metadata-token: '$TOKEN -v 'http://169.254.169.254/latest/meta-data/block-device-mapping/root'`"
+                - root=`echo $root | sed 's/^.\\{,5\\}//'`
+                - region=${region%?}
+                - echo $instance
+                - echo $root
+                - echo $region
+                - sync
+                - if [ $? -ne 0 ]; 
+                -   then FILESYSTEM_CONSISTENT=false echo Error syncing the filesystem. We will still try to freeze the filesystem.
+                -   else echo Sync complete.
+                - fi
+                - for target in $(findmnt -nlo TARGET -t ext3,ext4)
+                # If not root and ext3 or ext4 FsType freeze
+                -   do if [ ! $target == "/" ];
+                -         then fsfreeze -f $target
+                          # If freeze fails for any volume no volumes are tagged as FSConsistent.
+                -         if [ $? -ne 0 ]; 
+                -           then FILESYSTEM_CONSISTENT=false; echo Could not freeze filesystem $target.
+                -           else let 'NUM_FROZEN+=1'; echo Froze filesystem $target. 
+                -         fi 
+                -      fi 
+                - done
+                - volume_info=`aws ec2 describe-instances --instance-id $instance --query Reservations[*].Instances[*].BlockDeviceMappings[*].[DeviceName,Ebs.VolumeId] --output text --region $region`
+                - if [ $? -ne 0 ];
+                -   then sleep 2
+                -   volume_info=`aws ec2 describe-instances --instance-id $instance --query Reservations[*].Instances[*].BlockDeviceMappings[*].[DeviceName,Ebs.VolumeId] --output text --region $region`
+                -   if [ $? -ne 0 ]; 
+                -   then sleep 4
+                -     volume_info=`aws ec2 describe-instances --instance-id $instance --query Reservations[*].Instances[*].BlockDeviceMappings[*].[DeviceName,Ebs.VolumeId] --output text --region $region`
+                -     if [ $? -ne 0 ]; 
+                -     then sleep 8
+                -       volume_info=`aws ec2 describe-instances --instance-id $instance --query Reservations[*].Instances[*].BlockDeviceMappings[*].[DeviceName,Ebs.VolumeId] --output text --region $region`
+                -       if [ $? -ne 0 ]; 
+                -       then EXIT_STATUS=1; echo describe-instances failed, no snapshots done.
+                -       fi
+                -     fi
+                -   fi
+                - fi
+                - for item in $volume_info
+                - do
+                -   if [[ ${item:0:1} = "/" ]];
+                -     then devices=$item,$devices
+                -     else volumes=$item' '$volumes
+                - fi
+                - done
+                - num=1
+                - for volume in $(echo $volumes | tr " " "\n")
+                -   do
+                -     Device=$(echo $devices | cut  -d ',' -f $num)
+                -     num=$((num + 1))
+                -     tagSpec="{{instanceTags}}"
+                -     tagSpec=`echo $tagSpec | sed 's/.$//'`
+                      # If this is the root volume or if any volume failed to freeze don't add FSConsistent tag
+                -     if [ $Device == $root ] || [ $FILESYSTEM_CONSISTENT == "false" ]; 
+                -       then tagSpec+=',{Key=Device,Value='$Device'}]'
+                -       else tagSpec+=',{Key=Device,Value='$Device'},{Key=FSConsistent,Value='True'}]'
+                -     fi
+                -     sleep 2
+                -     outpost=`aws ec2 describe-instances --instance-id $instance --region $region --query Reservations[*].Instances[*].OutpostArn[] --output text`
+                -     if [ $? -ne 0 ];
+                -       then sleep 2
+                -         outpost=`aws ec2 describe-instances --instance-id $instance --region $region --query Reservations[*].Instances[*].OutpostArn[] --output text`
+                -       if [ $? -ne 0 ]; 
+                -         then sleep 4
+                -         outpost=`aws ec2 describe-instances --instance-id $instance --region $region --query Reservations[*].Instances[*].OutpostArn[] --output text`
+                -         fi
+                -     fi
+                -     if [ -z $outpost ]
+                -        then
+                -              echo "\$outpost is empty"
+                -               aws ec2 create-snapshot --volume-id  $volume --tag-specifications "$tagSpec" --description 'Filesystem-consistent snapshot of {{osName}} Volume.' --region $region > /dev/null 2>&1
+                -              if [ $? -ne 0 ];
+                -                 then sleep 2
+                -                 aws ec2 create-snapshot --volume-id  $volume --tag-specifications "$tagSpec" --description 'Filesystem-consistent snapshot of {{osName}} Volume.' --region $region > /dev/null 2>&1
+                -                 if [ $? -ne 0 ]; 
+                -                     then sleep 4
+                -                     aws ec2 create-snapshot --volume-id  $volume --tag-specifications "$tagSpec" --description 'Filesystem-consistent snapshot of {{osName}} Volume.' --region $region > /dev/null 2>&1
+                -                     if [ $? -ne 0 ]; 
+                -                       then sleep 8
+                -                       aws ec2 create-snapshot --volume-id  $volume --tag-specifications "$tagSpec" --description 'Filesystem-consistent snapshot of {{osName}} Volume.' --region $region > /dev/null 2>&1
+                -                         if [ $? -ne 0 ]; 
+                -                           then EXIT_STATUS=1; echo The call to take the snapshot for $volume failed. 
+                -                           else echo Snapshot creation command completed, snapshot for $volume is now in progress asynchronously. 
+                -                         fi
+                -                     fi
+                -                  fi
+                -              fi
+                -        else
+                -              echo "\$outpost is NOT empty"
+                -              echo $outpost
+                -              aws ec2 create-snapshot --volume-id  $volume --tag-specifications "$tagSpec" --description 'Filesystem-consistent snapshot of {{osName}} Volume.' --outpost-arn $outpost > /dev/nul
+                -              if [ $? -ne 0 ];
+                -                 then sleep 2
+                -                  aws ec2 create-snapshot --volume-id  $volume --tag-specifications "$tagSpec" --description 'Filesystem-consistent snapshot of {{osName}} Volume.' --outpost-arn $outpost > /dev/nul
+                -                   if [ $? -ne 0 ]; 
+                -                     then sleep 4
+                -                      aws ec2 create-snapshot --volume-id  $volume --tag-specifications "$tagSpec" --description 'Filesystem-consistent snapshot of {{osName}} Volume.' --outpost-arn $outpost > /dev/nul
+                -                       if [ $? -ne 0 ]; 
+                -                         then sleep 8
+                -                         aws ec2 create-snapshot --volume-id  $volume --tag-specifications "$tagSpec" --description 'Filesystem-consistent snapshot of {{osName}} Volume.' --outpost-arn $outpost > /dev/nul
+                -                           if [ $? -ne 0 ]; 
+                -                             then EXIT_STATUS=1; echo The call to take the snapshot for $volume failed. 
+                -                             else echo Snapshot creation command completed, snapshot for $volume is now in progress asynchronously. 
+                -                           fi
+                -                       fi
+                -                   fi
+                -                 fi
+                -    fi 
+                - done
+                - for target in $(findmnt -nlo TARGET -t ext3,ext4); 
+                -   do if [ ! $target == "/" ]; 
+                -       then fsfreeze -u $target; 
+                -       if [ $? -ne 0 ]; 
+                -         then echo Could not thaw filesystem $target on $volume
+                -         else let 'NUM_THAWED+=1';echo Thawed filesystem $target; 
+                -       fi
+                -     fi 
+                - done
+                # If we cant thaw any frozen volume we fail command
+                - if [ $NUM_THAWED -ne $NUM_FROZEN ];
+                - then EXIT_STATUS=1; fi
+                - echo EXIT_STATUS $EXIT_STATUS
+                - exit $EXIT_STATUS
+
+  rLinuxLevel2SnapshotDocSSMParam:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: rLinuxLevel2SnapshotDoc
+    Properties:
+      Name: "/DXC/Backups/LinuxLevel2SnapshotDoc"
+      Type: "String"
+      Value: !Ref rLinuxLevel2SnapshotDoc
+      Description: "SSM parameter for Linux Level 2 Snapshot Document v1"
+
+Outputs:
+  DocumentName:
+    Value: !Ref rLinuxLevel2SnapshotDoc

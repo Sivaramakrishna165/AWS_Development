@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: 'To create cloudwatch rule, lambda execution role and lambda function for native backup monitoring'
+
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: "None"
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+    
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: "None"
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+    
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/NativebackupMonitoring/S3AssetBucket
+    Description: "SSM Parameter for bucket location"
+  
+  pCommonSNOWTopic:
+    Description: "[DO NOT CHANGE] ssm param of Common ServiceNow Topic for service now alerts"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/SES/Module/CommonServicenow/ComSnowStdInputArn"
+
+  pAccountFeatureDefinitionsTableName:
+    Type: String
+    Description: "Account Feature Definitions table name for fetching the incident priority"
+    Default: "AccountFeatureDefinitions"    
+
+Resources:
+
+########## Lambda Execution Role ##########
+  rNativebackupMonitoringLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "NativebackupMonitoringLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-nativebackup-monitoring*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-nativebackup-monitoring*:log-stream:*'                  
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:Query"
+                Resource: 
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AccountFeatureDefinitions*'
+              - Effect: "Allow"
+                Action:
+                  - sns:Publish
+                Resource: 
+                  - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FeatureCommonServicenowStack-Servicenow-*"
+
+########## Lambda function to perform SNS publish ##########                  
+
+  rNativebackupMonitoringLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: "dxcms-nativebackup-monitoring" 
+      Environment:
+        Variables:
+          SNS_TOPIC: !Ref pCommonSNOWTopic
+          AFD_TABLE: !Ref pAccountFeatureDefinitionsTableName
+      Description: "This lambda will be triggered by an event rule to perform SNS publish"
+      Role: !GetAtt rNativebackupMonitoringLambdaRole.Arn
+      Runtime: python3.11
+      Handler: dxcms_nativebackup_monitoring.lambda_handler
+      MemorySize: 128
+      Timeout: 300
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/nativebackup_monitoring.zip"
+      Tags:
+        - Key: "Purpose"
+          Value: "To perform SNS publish"
+        - Key: Owner
+          Value: DXC
+
+########## Event rule that triggers when there is a change in native backup job state ##########
+  rNativebackupMonitoringEventRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Event that triggers the native backup monitoring lambda"
+      EventPattern:
+        detail-type:
+          - "Backup Job State Change"
+        source:
+          - "aws.backup"
+        detail:
+          state:
+            - "FAILED"
+            - "ABORTED"
+      Targets:
+        -
+          Arn: !GetAtt rNativebackupMonitoringLambda.Arn
+          Id: "NativebackupMonitoringLambdaExecRule"    
+
+################## Lambda Resource Based Policy - Event Rule ###################
+
+  rNativebackupMonitoringLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName:
+        Ref: "rNativebackupMonitoringLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt rNativebackupMonitoringEventRule.Arn             

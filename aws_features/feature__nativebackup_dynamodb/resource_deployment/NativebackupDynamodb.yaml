@@ -1,0 +1,299 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: DXC Managed Services - AWS Native BackUp for DynamoDB
+
+Parameters:
+
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/NativebackupDynamodb/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+
+  pPlatformVersion:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Main/pPlatformVersion
+    Description: "[DO NOT CHANGE] SSM Parameter for platform version"
+  
+  pfCreateNewKMSKey:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: "Create new KMS key for AWS DynamoDB Backup. If true, specify KeyName parameter, otherwise specify ExistingKeyArn."
+
+  pfKeyName:
+    Type: String
+    Default: 'dynamodb-backup-kms'
+    Description: "AWS KMS Key name. Required if CreateNewKMSKey param is true."
+
+  pfAliasName:
+    Type: String
+    Default: 'alias/dxc/dynamodb'
+    Description: "AWS KMS Alias Name. Required if CreateNewKMSKey param is true."     
+
+  pfExistingKeyArn:
+    Type: String
+    Default: "dummy"
+    Description: "KMS Key Arn. Required if CreateNewKMSKey param is false."
+
+  pfCreateNewBackupVault:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+    Description: "Create new Backup Vault for DynamoDB Backup."
+
+  pfBackupVaultName:
+    Type: String
+    Description: "Enter the Backup Vault Name to be create for DynamoDB"
+    Default: 'DynamoDBBackUpVault'
+
+  pfBackupPlanName:
+    Type: String
+    Default: "DynamoDB-BackUp-Plan"
+    Description: "AWS DynamoDB Backup plan name."
+
+  pfBackupRuleName:
+    Type: String
+    Default: "DynamoDB-RuleName"
+    Description: "AWS DynamoDB Backup rule name."
+
+  pfDynamoDBBackupScheduleExpression:
+    Type: String
+    Default: "cron(15 12 * * ? *)"
+    Description: "AWS Backup cron expression."
+
+  pfBackupDeleteAfterDays:
+    Type: Number
+    Default: 30
+    Description: "Days to expire backups from vault."
+
+  pfBackupSelectionName:
+    Type: String
+    Default: "DynamoDB-SelectionName"
+    Description: "AWS Backup selection name."
+
+  pfBackupConditionTagKey:
+    Type: String
+    Default: "aws:ResourceTag/Owner"
+    Description: "Tag:Key associated with the resources to back up."
+
+  pfBackupConditionTagValue:
+    Type: String
+    Default: "DXC"
+    Description: "Tag:Value associated with the resources to back up."
+
+  pfVaultMinRetentionDays:
+    Type: String
+    Default: 30
+    Description: "Retention period in days that the vault retains backup data."
+
+  # pfVaultMaxRetentionDays:
+  #   Type: String
+  #   #Default: 30
+  #   Default: "dummy"
+  #   Description: "The maximum retention period that the vault retains its recovery points.
+  #                 Note: Leave it default if you don't need this"
+
+  # pfVaultChangeableForDays:
+  #   Type: String
+  #   Default: "dummy"
+  #   Description: "[WARNING] Number of days before the vault lock. After this period, Vault Lock becomes immutable and cannot be changed or deleted.\n
+  #                 NOTE: If this value is mentioned then, LockConfiguration will be Compliance mode otherwise Governance mode.\n
+  #                 Should be minimum 3 or greater"
+
+  pfSnowInciPriority:
+    Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor, 4-warning, 5-ok (can be updated if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3', '4', '5']
+
+
+Conditions:
+  cUseDefaultKey: !And [!Equals [!Ref pfCreateNewKMSKey, "false"],!Equals [!Ref pfExistingKeyArn, "dummy"]]
+  cCreateNewKey:  !Equals [!Ref pfCreateNewKMSKey, "true"]
+  cCreateNewBackupVault: !Equals [!Ref pfCreateNewBackupVault, "true"]
+  cDontCreateNewBackupVault: !Equals [!Ref pfCreateNewBackupVault, "false"]
+  # All these will be used in future
+  #cComplianceMode: !Not [!Equals [!Ref pfVaultChangeableForDays, "dummy"]]
+  #cGovernanceMode: !Equals [!Ref pfVaultChangeableForDays, ""]
+  #cVaultMinRetNotDeclared: !Equals [!Ref pfVaultMinRetentionDays, "dummy"]
+  #cVaultMaxRetNotDeclared: !Equals [!Ref pfVaultMaxRetentionDays, "dummy"]
+  #cVaultLockRequired: !And [!Not [!Equals [!Ref pfVaultMinRetentionDays, ""]] , !Not [!Equals [!Ref pfVaultChangeableForDays, ""]]]
+
+Resources:
+
+  rDynamoBkUpIamRole:
+    Type: 'AWS::IAM::Role'
+    Properties: 
+      AssumeRolePolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "backup.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+      Description: "Allows AWS Backup to access AWS resources on your behalf to Backup and Restore."
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+      Path: /
+      RoleName: !Join ["-", ["DynamoDBNativeBackup", !Ref "AWS::Region"]]
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: "rDynamoBkUpIamRole"
+      - Key: Owner
+        Value: 'DXC'
+      - Key: Purpose
+        Value: "DynamoDBBackup"
+
+  rDynamoDBBkUpKMS:
+    Type: 'AWS::KMS::Key'
+    Condition: cCreateNewKey
+    DeletionPolicy: Retain
+    Properties: 
+      Description: A symmetric KMS key to AWS Backup Vault
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: !Ref pfKeyName
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Join 
+                - ''
+                - - 'arn:aws:iam::'
+                  - !Ref 'AWS::AccountId'
+                  - ':root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow AWS Backup IAM Role use of the key
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt rDynamoBkUpIamRole.Arn
+            Action:
+              - 'kms:DescribeKey'
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey'
+              - 'kms:GenerateDataKeyWithoutPlaintext'
+            Resource: '*'
+      #PendingWindowInDays: 5
+      PendingWindowInDays: 30
+      
+  rDynamoBkUpKMSAlias:
+    Type: 'AWS::KMS::Alias'
+    Condition: cCreateNewKey
+    DependsOn: rDynamoDBBkUpKMS
+    Properties:
+      AliasName: !Ref pfAliasName
+      TargetKeyId: !Ref rDynamoDBBkUpKMS      
+
+  rDynamoBackupVault:
+    Type: AWS::Backup::BackupVault
+    DeletionPolicy: Retain
+    Condition: cCreateNewBackupVault
+    Properties:
+      #AccessPolicy: Json
+      BackupVaultName: !Ref pfBackupVaultName
+      EncryptionKeyArn: !If [cUseDefaultKey, !Ref "AWS::NoValue", !If [cCreateNewKey, !GetAtt rDynamoDBBkUpKMS.Arn, !Ref pfExistingKeyArn]]
+      LockConfiguration:
+      #for now we will go with GOVERNANCE mode ONLY
+        #ChangeableForDays:  !If [cComplianceMode, !Ref pfVaultChangeableForDays, !Ref "AWS::NoValue"]
+        MinRetentionDays: !Ref pfVaultMinRetentionDays
+        #MaxRetentionDays: !If [cVaultMaxRetNotDeclared, !Ref "AWS::NoValue", !Ref pfVaultMaxRetentionDays]
+      #Notifications: NotificationObjectTyp
+      BackupVaultTags:
+        "Owner" : "DXC"
+
+  rDynamoDBBackUpPlan:
+    Type: AWS::Backup::BackupPlan
+    DependsOn: rDynamoBackupVault
+    Condition: cCreateNewBackupVault
+    Properties:
+      BackupPlan: 
+        BackupPlanName: !Ref pfBackupPlanName
+        BackupPlanRule:
+          - 
+            RuleName: !Ref pfBackupRuleName
+            StartWindowMinutes: 60
+            TargetBackupVault: !Ref pfBackupVaultName
+            ScheduleExpression: !Ref pfDynamoDBBackupScheduleExpression
+            Lifecycle: {
+                DeleteAfterDays: !Ref pfBackupDeleteAfterDays
+            }
+
+  rDynamoDBBackUpPlanUpd:
+    Type: AWS::Backup::BackupPlan
+    Condition: cDontCreateNewBackupVault
+    Properties:
+      BackupPlan: 
+        BackupPlanName: !Ref pfBackupPlanName
+        BackupPlanRule:
+          - 
+            RuleName: !Ref pfBackupRuleName
+            StartWindowMinutes: 60
+            TargetBackupVault: !Ref pfBackupVaultName
+            ScheduleExpression: !Ref pfDynamoDBBackupScheduleExpression
+            Lifecycle: {
+                DeleteAfterDays: !Ref pfBackupDeleteAfterDays
+            }
+
+  rDynamoDbStorageBackupSelection:
+    Type: AWS::Backup::BackupSelection
+    DependsOn: rDynamoDBBackUpPlan
+    Condition: cCreateNewBackupVault
+    Properties:
+      BackupPlanId: !Ref rDynamoDBBackUpPlan
+      BackupSelection: 
+        SelectionName: !Ref pfBackupSelectionName
+        IamRoleArn: !GetAtt rDynamoBkUpIamRole.Arn
+        Resources: 
+          - "arn:aws:dynamodb:*:*:table/*"
+        Conditions:
+          StringEquals:
+            - ConditionKey: !Ref pfBackupConditionTagKey
+              ConditionValue: !Ref pfBackupConditionTagValue
+
+  rDynamoDbStorageBackupSelectionUpd:
+    Type: AWS::Backup::BackupSelection
+    DependsOn: rDynamoDBBackUpPlanUpd
+    Condition: cDontCreateNewBackupVault
+    Properties:
+      BackupPlanId: !Ref rDynamoDBBackUpPlanUpd
+      BackupSelection: 
+        SelectionName: !Ref pfBackupSelectionName
+        IamRoleArn: !GetAtt rDynamoBkUpIamRole.Arn
+        Resources: 
+          - "arn:aws:dynamodb:*:*:table/*"
+        Conditions:
+          StringEquals:
+            - ConditionKey: !Ref pfBackupConditionTagKey
+              ConditionValue: !Ref pfBackupConditionTagValue
+
+Outputs:
+  oKMSKeyBackup:
+    Description: DynamoDB KMS Key Arn
+    Value: !If [cCreateNewKey, !GetAtt rDynamoDBBkUpKMS.Arn, !Ref pfExistingKeyArn]

@@ -1,0 +1,82 @@
+---
+# Feature Definition (FD) for AWSLambdaMonitoring
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AWSLambdaMonitoring
+Version: '9.0.0.2'
+StandardCreationBatch: 3
+EnableFeature: true
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creating the cloudwatch alarms for Lambda functions
+FeatureParams:
+  pCommonIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priroity fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+Alarms:
+  Invocations_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    EvaluationPeriods: 3
+    MetricName: Invocations
+    Namespace: AWS/Lambda
+    Period: 300
+    Statistic: Average
+    Threshold: 100
+  Duration_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    EvaluationPeriods: 3
+    MetricName: Duration
+    Namespace: AWS/Lambda
+    Period: 300
+    Statistic: Average
+    Threshold: 720000
+  Errors_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    EvaluationPeriods: 3
+    MetricName: Errors
+    Namespace: AWS/Lambda
+    Period: 300
+    Statistic: Average
+    Threshold: 5
+  Throttles_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    EvaluationPeriods: 3
+    MetricName: Throttles
+    Namespace: AWS/Lambda
+    Period: 300
+    Statistic: Average
+    Threshold: 5
+  ConcurrentExecutions_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    EvaluationPeriods: 3
+    MetricName: ConcurrentExecutions
+    Namespace: AWS/Lambda
+    Period: 300
+    Statistic: Average
+    Threshold: 50
+  UnreservedConcurrentExecutions_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    EvaluationPeriods: 3
+    MetricName: UnreservedConcurrentExecutions
+    Namespace: AWS/Lambda
+    Period: 300
+    Statistic: Average
+    Threshold: 50
+AllowDisable: true
+ResourceDeployment:
+  - aws_lambda_monitoring.yaml
+DepensOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities
+  
+   

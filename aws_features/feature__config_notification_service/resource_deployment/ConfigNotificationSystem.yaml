@@ -1,0 +1,43 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "CF Template to deploy Config Notification System"
+
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/ConfigNotificationService/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+  
+  pDXCS3KeyPrefix:
+      Type: String
+      Default: 'None'
+      Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+      Type: String
+      Default: 'None'
+      Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pfSnowInciPriority:
+      Type: String
+      Default: '3'
+      AllowedValues: ['1', '2', '3', '4', '5']
+      Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor, 4-warning, 5-ok (can be updated if necessary)'
+Resources:
+  rDynamoDBStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL:
+        !Sub "https://s3.${AWS::Region}.amazonaws.com/${pDXCS3BucketName}/deploy/standards/feature-ConfigNotificationService/${pFeatureVersion}/feature__config_notification_service/resource_deployment/config-dynamodb.yaml"
+      TimeoutInMinutes: 20
+
+  rConfigEngineStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: "rDynamoDBStack"
+    Properties:
+      TemplateURL:
+        !Sub "https://s3.${AWS::Region}.amazonaws.com/${pDXCS3BucketName}/deploy/standards/feature-ConfigNotificationService/${pFeatureVersion}/feature__config_notification_service/resource_deployment/notification-engine.yaml"
+      Parameters:
+        pFeatureVersion: !Ref pFeatureVersion
+        pDXCS3KeyPrefix: !Ref pDXCS3KeyPrefix
+        
+      TimeoutInMinutes: 10
+      

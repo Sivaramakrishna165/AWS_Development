@@ -1,0 +1,82 @@
+---
+# Feature Definition (FD) for the AWS ECS Fargate Based CloudWatch Dashboard as a feature 
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: EcsFargateClusterCloudwatchDashboard
+Version: '9.0.0.1'
+StandardCreationBatch: 4
+EnableFeature: False
+FeatureParams:
+  pEcsFargateDashboardName:
+    Description: Enter the dashboard name for the ECS Fargate launch type running desired no. of tasks.
+    Type: String
+    Default: ''
+  pEcsFargateClusterName:
+    Description: Name of the ECS cluster which can be retrieved from the output section of previous to previous feature deployment.
+    Type: String
+    Default: ''
+  pEcsFargateServiceName:
+    Description: Name of the ECS Service which can be retrieved from the output section of previous feature deployment.
+    Type: String
+    Default: ''
+  pEcsFargateClusterRelatedAlarm:
+    Description: 'Enable this when you want to create Cluster related Alarm for CPU and MEMORY. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities should be deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  pEcsFargateClusterorServiceRelatedAlarm:
+    Description: 'Enable this when you want to create Cluster or Service related Alarm for CPU and MEMORY. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities should be deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  pFargateClusterorServiceCPUUtilThreshold:
+    Type: String
+    Default: 80
+    Description: The target utilization for the ECS Cluster or Service CPU.
+  pEcsFargateClusterorServiceMemoryUtilThreshold:
+    Type: String
+    Default: 80
+    Description: The target utilization in for the ECS Cluster or Service Memory.   
+  pEcsFargateClusterCPUUtilThreshold:
+    Type: String
+    Default: 80
+    Description: The target utilization for the ECS Fargate Cluster CPU.
+  pEcsFargateClusterMemoryUtilThreshold:
+    Type: String
+    Default: 80
+    Description: The target utilization in MB for the ECS Fargate Cluster Memory.
+  pEcsFargateClusterorServiceComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+  pEcsFargateClusterorServiceStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Average'
+  pPeriodOverWhichStatIsAppliedForCpuAndMemory:
+    Type: String
+    Default: 60
+    Description: Provided the default value in multiple of 60 in seconds, over which the statistic is applied for CPU and Memory.  
+  pEvaluationPeriod:
+    Type: String
+    Default: 2
+    Description: Provided the default number of periods over which data is compared to the specified threshold.
+  pPriorityIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priority fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creating a Feature which creates an AWS CloudWatch Dashboard for Amazon ECS Fargate Launch Type to check the ECS Tasks metrics.
+AllowDisable: true
+ResourceDeployment:
+  - EcsFargateClusterCloudwatchDashboard.yaml
+DependsOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities

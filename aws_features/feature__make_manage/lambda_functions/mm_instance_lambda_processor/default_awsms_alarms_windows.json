@@ -1,0 +1,142 @@
+[
+    {
+        "ActionsEnabled": true,
+        "AlarmType":"Static",
+        "AlarmActions": [],
+        "AlarmDescription": "cpu usage",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "Dimensions":[{ "Name": "InstanceId",
+                        "Value": "<DND. To be Filled Automatically>"
+                      }],
+        "EvaluationPeriods": "2",
+        "MetricName": "CPUUtilization",
+        "Namespace": "AWS/EC2",
+        "Period": "300",
+        "Statistic": "Average",
+        "ThresholdOrBand": "85",
+        "Unit": "Percent"
+    },
+    {
+        "ActionsEnabled": true,
+        "AlarmActions": [],
+        "AlarmType":"Static",
+        "AlarmDescription": "status check failed",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions":[{ "Name": "InstanceId",
+                        "Value": "<DND. To be Filled Automatically>"
+                      }],
+        "EvaluationPeriods": "3",
+        "MetricName": "StatusCheckFailed",
+        "Namespace": "AWS/EC2",
+        "Period": "60",
+        "Statistic": "Minimum",
+        "ThresholdOrBand": "0"
+    },
+    {
+        "ActionsEnabled": true,
+        "AlarmActions": [],
+        "AlarmType":"Static",
+        "AlarmDescription": "status check failed",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions":[{ "Name": "InstanceId",
+                        "Value": "<DND. To be Filled Automatically>"
+                      }],
+        "EvaluationPeriods": "3",
+        "MetricName": "StatusCheckFailed_System",
+        "Namespace": "AWS/EC2",
+        "Period": "60",
+        "Statistic": "Minimum",
+        "ThresholdOrBand": "0"
+    },
+    {
+        "ActionsEnabled": true,
+        "AlarmActions": [],
+        "AlarmType":"Static",
+        "AlarmDescription": "status check failed",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions":[{ "Name": "InstanceId",
+                        "Value": "<DND. To be Filled Automatically>"
+                      }],
+        "EvaluationPeriods": "3",
+        "MetricName": "StatusCheckFailed_Instance",
+        "Namespace": "AWS/EC2",
+        "Period": "60",
+        "Statistic": "Minimum",
+        "ThresholdOrBand": "0"
+    },
+    {
+        "ActionsEnabled": true,
+        "AlarmActions": [],
+        "OKActions": [],
+        "AlarmType":"Static",
+        "AlarmDescription": "Free memory",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions":[{ "Name": "InstanceId",
+                        "Value": "<DND. To be Filled Automatically>"
+                      }],
+        "EvaluationPeriods": "2",
+        "MetricName": "Memory % Committed Bytes In Use",
+        "Namespace": "Windows/Default",
+        "Period": "300",
+        "Statistic": "Minimum",
+        "ThresholdOrBand": "85",
+        "Unit": "Percent"
+    },
+    {
+        "ActionsEnabled": true,
+        "AlarmActions": [],
+        "OKActions": [],
+        "AlarmType":"Static",
+        "AlarmDescription": "Free Disk Space for C:",
+        "ComparisonOperator": "LessThanThreshold",
+        "Dimensions":[{ "Name": "instance", "Value": "C:"},
+                      { "Name": "InstanceId", "Value": "<DND. To be Filled Automatically>"},
+                      { "Name": "objectname", "Value": "LogicalDisk"}
+                     ],
+        "EvaluationPeriods": "2",
+        "MetricName": "LogicalDisk % Free Space",
+        "Namespace": "Windows/Default",
+        "Period": "300",
+        "Statistic": "Minimum",
+        "ThresholdOrBand": "15",
+        "Unit": "Percent"
+    },
+    {
+        "ActionsEnabled": true,
+        "AlarmActions": [],
+        "OKActions": [],
+        "AlarmType":"Static",
+        "AlarmDescription": "Free Disk Space for D:",
+        "ComparisonOperator": "LessThanThreshold",
+        "Dimensions":[{ "Name": "instance", "Value": "D:"},
+                      { "Name": "InstanceId", "Value": "<DND. To be Filled Automatically>"},
+                      { "Name": "objectname", "Value": "LogicalDisk"}
+                     ],
+        "EvaluationPeriods": "2",
+        "MetricName": "LogicalDisk % Free Space",
+        "Namespace": "Windows/Default",
+        "Period": "300",
+        "Statistic": "Minimum",
+        "ThresholdOrBand": "15",
+        "Unit": "Percent"
+    },
+    {
+        "ActionsEnabled": true,
+        "AlarmActions": [],
+        "OKActions": [],
+        "AlarmType":"Static",
+        "AlarmDescription": "Free Disk Space for E:",
+        "ComparisonOperator": "LessThanThreshold",
+        "Dimensions":[{ "Name": "instance", "Value": "E:"},
+                      { "Name": "InstanceId", "Value": "<DND. To be Filled Automatically>"},
+                      { "Name": "objectname", "Value": "LogicalDisk"}
+                     ],
+        "EvaluationPeriods": "2",
+        "MetricName": "LogicalDisk % Free Space",
+        "Namespace": "Windows/Default",
+        "Period": "300",
+        "Statistic": "Minimum",
+        "ThresholdOrBand": "15",
+        "Unit": "Percent"
+    }
+ ]

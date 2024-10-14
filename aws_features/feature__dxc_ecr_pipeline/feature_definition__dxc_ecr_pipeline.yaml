@@ -1,0 +1,193 @@
+---
+# Feature Definition (FD) for the ECR as a feature 
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: DxcEcrPipeline
+Version: '9.0.0.3'
+StandardCreationBatch: 3
+EnableFeature: False
+FeatureParams:
+  BuildFile:
+    Type: String
+    Default: 'buildspec.yaml'
+    Description: "Buildspec file to run during the pipeline build stage"
+  BuildFilePush:
+    Type: String
+    Default: 'buildspecpush.yaml'
+    Description: "Buildspec file to run during the pipeline build stage" 
+  SSMParameterName:
+    Type: String
+    Default: ''
+  GitHubRepository:
+    Type: String
+    Default: ''
+    Description: "Github repository name eg. <user>/<repo> like cloud/DXC-AWSMS-Offerings"
+  GitHubBranch:
+    Type: String
+    Default: ''
+    Description: 'Provide Git branch for executing the pipeline on code push'
+  GithubSourceLocation:
+    Type: String
+    Default: ''
+    Description: 'This is the source location provided under codebuild project. we need to provide full <GITHUB-URL> here'     
+  CodeBuildSourceVersion:
+    Type: String
+    Default: ''
+    Description: 'This is the codebuild source version and we need to provide the branch name here [OPTIONAL]'
+  CodeStarConnectionARN:
+    Type: String
+    Description: Enter the connection ARN to establish connection between GIT and AWS Codepipeline
+    Default: '' 
+  ManualApproval:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Require manual approval before pushing docker images to ECR repositoy, will email Primary Email and (optionally) Secondary Email specified in the Email Notification Settings section
+    Type: String
+  EmailPrimary:
+    Default: ''
+    Description: Primary email to notify for pending manual approvals and pipeline execution notifications
+    Type: String
+  EmailSecondary:
+    Default: ''
+    Description: Secondary email to notify for pending manual approvals and pipeline execution notifications
+    Type: String
+  ArtifactsS3KeyLocation:
+    Default: 'deploy'
+    Description: 'S3 key location of the templates'
+    Type: String
+  ECRRepositoryName:
+    Type: String
+    Default: ''
+    AllowedPattern: "^[a-z0-9-_/.]*$"
+    Description: 'Enter the name of the ECR Repository'
+  EncryptionOption:
+    Type: String
+    Default: Default KMS
+    Description: Select the encryption option for the repository
+    AllowedValues:
+      - Default KMS
+      - Customer Managed KMS
+  KmsKeyArn:
+    Type: String
+    Description: The KMS key ARN to use for encryption (required if EncryptionOption is KMS) 
+    Default: ""
+  ImageTagMutability:
+    Type: String
+    AllowedValues:
+      - 'IMMUTABLE'
+      - 'MUTABLE'
+    Default: 'IMMUTABLE'
+    Description: 'Please choose one of the two allowed values - IMMUTABLE (image tag cannot be overwritten) or MUTABLE (tag can be overwritten)'  
+  ScanonPush:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: 'Based on true and false, Enable(true)/Disable(false) this option if you want to scan the image on first push'
+  CrossRegionReplication:
+    Description: Enable cross-region replication by choosing true as an option else keep it default to false.
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+  CrossAccountReplication:
+    Description: Enable cross-account replication by choosing true as an option else keep it default to false.
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+  CrossRegionDestinationRegions:
+    Description: Comma-separated list of destination regions for cross-region replication
+    Type: String
+    Default: ''
+  CrossAccountDestinationRegions:
+    Description: Comma-separated list of destination regions for cross-account replication
+    Type: String
+    Default: ''
+  CrossAccountDestinationAccountIds:
+    Description: Comma-separated list of destination account IDs for cross-account replication
+    Type: String
+    Default: ''  
+  
+  PushImageApplyFailedBuildsAlarm:
+    Description: 'Enable for creating Failed Builds Alarm for push image project. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities is deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  PushImageFailedBuildsPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 60
+  PushImageFailedBuildsStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Sum'
+  PushImageFailedBuildsThreshold:
+    Description: 'The value to compare with the specified statistic.'
+    Type: Number
+    Default: 0
+    
+  PushImageFailedBuildsEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 2
+  PushImageFailedBuildsComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  BuildAndTagApplyFailedBuildsAlarm:
+    Description: 'Enable for creating Failed Builds Alarm for tag and build project. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities is deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  BuildAndTagFailedBuildsPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 60
+  BuildAndTagFailedBuildsStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Sum'
+  BuildAndTagFailedBuildsThreshold:
+    Description: 'The value to compare with the specified statistic.'
+    Type: Number
+    Default: 0
+    
+  BuildAndTagFailedBuildsEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 2
+  BuildAndTagFailedBuildsComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  PriorityIncidentTopic:
+    Description: 'SNS Priority Incident Topic for service now alerts'
+    Type: "String"
+    Default: "DXCMS-CW-Alarms-Create-Incidents"
+
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: CICD Pipeline to push the docker images on ECR repository on whenever we are edit code on the GITHUB Repo branches
+AllowDisable: true
+ResourceDeployment:
+  - DxcEcrPipeline.yaml
+DependsOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities

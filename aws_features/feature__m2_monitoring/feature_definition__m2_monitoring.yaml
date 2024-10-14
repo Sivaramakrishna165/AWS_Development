@@ -1,0 +1,80 @@
+---
+# Feature Definition (FD) for M2 Monitoring (Mainframe Modernization Monitoring)
+# This feature creates alarms for monitoring the AWS Mainframe Modernization managed runtime environment 
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: M2Monitoring 
+Version: '9.0.0.2'
+StandardCreationBatch: 4
+EnableFeature: false
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: This feature creates alarms for monitoring the AWS Mainframe Modernization managed runtime environment
+FeatureParams:
+  #pAutoUpdateHash:
+  #  Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+  #  Default: '0'
+  #  Type: String
+  pUpdateHash:
+    Description: 'To update alarm values, increment this hash prior to running ses-standards-master update'
+    Default: '0'
+    Type: String
+
+Alarms:
+  m2_env_MemoryUtilization:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: EnvironmentId
+      Value: <To be Filled>
+    EvaluationPeriods: 3
+    MetricName: MemoryUtilization
+    Namespace: AWS/M2
+    Period: 300
+    Statistic: Average
+    Threshold: 90
+  m2_env_CPUUtilization:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: EnvironmentId
+      Value: <To be Filled>
+    EvaluationPeriods: 3
+    MetricName: CPUUtilization
+    Namespace: AWS/M2
+    Period: 300
+    Statistic: Average
+    Threshold: 90
+  m2_env_OutboundNetworkThroughput:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: EnvironmentId
+      Value: <To be Filled>
+    EvaluationPeriods: 3
+    MetricName: OutboundNetworkThroughput
+    Namespace: AWS/M2
+    Period: 300
+    Statistic: Maximum
+    Threshold: 10000
+  m2_env_InboundNetworkThroughput:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: EnvironmentId
+      Value: <To be Filled>
+    EvaluationPeriods: 3
+    MetricName: InboundNetworkThroughput
+    Namespace: AWS/M2
+    Period: 300
+    Statistic: Maximum
+    Threshold: 10000
+
+AllowDisable: True
+DependsOnFeature:
+  - M2RunEnv
+  - AWSCloudWatchAlarmsIncidentPriorities
+ResourceDeployment:
+  - m2_monitoring.yaml

@@ -1,0 +1,31 @@
+---
+# Feature Definition (FD) for ec2_sessionmonitoring
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: EC2SessionMonitoring
+Version: '9.0.0.4'
+StandardCreationBatch: 2
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Enabling the ec2 session monitoring to s3 bucket
+
+FeatureParams:
+  pGlacierRetention:
+    Description: Number of days to retain logs in Glacier (Minimum 90)
+    Type: Number
+    Default: 2555
+  pTransitionDays:
+    Description: Number of days to retain logs before archiving to Glacier
+    Type: Number
+    Default: 90
+    
+AllowDisable: true
+ResourceDeployment:
+  - EC2SessionMonitoring.yaml

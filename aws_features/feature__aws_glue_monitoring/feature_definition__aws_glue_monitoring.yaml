@@ -1,0 +1,47 @@
+---
+# Feature Definition (FD) for AWSGlueMonitoring
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AWSGlueMonitoring
+Version: '9.0.0.2'
+StandardCreationBatch: 3
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creating the cloudwatch alarms for Glue service
+FeatureParams:
+  pCommonIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priroity fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+Alarms:
+  GlueJobTaskFailureAlarm:
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+      - Name: Type
+        Value: count
+      - Name: JobRunId
+        Value: ALL
+      - Name: JobName
+        Value: <To be filled>
+      MetricName: glue.driver.aggregate.numFailedTasks
+      Namespace: Glue         
+      Period: 300
+      Statistic: Sum
+      EvaluationPeriods: 3
+      Threshold: 5
+AllowDisable: true
+ResourceDeployment:
+  - aws_glue_monitoring.yaml
+DepensOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities

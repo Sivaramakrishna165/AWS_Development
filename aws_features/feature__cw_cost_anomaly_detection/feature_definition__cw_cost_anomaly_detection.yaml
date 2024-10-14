@@ -1,0 +1,40 @@
+---
+# Feature Definition (FD) for CW Anomaly Detection
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: CWCostAnomalyDetection
+Version: '12.0.0.3'
+StandardCreationBatch: 3
+EnableFeature: false
+FeatureParams:
+  pServices:
+    Default: "AWS Secrets Manager,Amazon Simple Notification Service,Amazon Elastic Compute Cloud - Compute,Amazon Simple Queue Service,Amazon Elastic Container Service,Amazon GuardDuty,Amazon FSx,Amazon Simple Storage Service,AWS Lambda,AWS Config,AWS Directory Service,AmazonCloudWatch"
+    Description: Top AWS Services which are monitor for CostAnomaly
+    Type: String
+  pfSnowInciPriority:
+    Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor, 4-warning, 5-ok (can be updated if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3', '4', '5']
+  pSenderEmailID:
+    Default: "abc@example.com"
+    Description: provide the sender email id
+    Type: String
+  pReceiverEmailID:
+    Default: "abc@example.com"
+    Description: provide the receiver email id
+    Type: String
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: 'CW Cost Anomaly Monitor' 
+AllowDisable: true
+ResourceDeployment:
+  - cw_cost_anomaly_detection.yaml
+DepensOnFeature:
+  - CommonServicenow  

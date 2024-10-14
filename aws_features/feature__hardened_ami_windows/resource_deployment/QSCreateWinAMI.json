@@ -1,0 +1,843 @@
+{
+  "AWSTemplateFormatVersion":"2010-09-09",
+    "Description": "Create Windows AMI",
+    "Parameters": {
+     "pDXCS3MainBucketName": {
+       "Type": "AWS::SSM::Parameter::Value<String>",
+       "Default": "/DXC/Main/pDXCS3BucketName",
+       "Description": "[DO NOT CHANGE] SSM Parameter for bucket location"
+     },
+     "pDXCS3CDSBucketName": {
+       "Type": "AWS::SSM::Parameter::Value<String>",
+       "Default": "/DXC/SES/Module/HardenedAMIWindows/S3AssetBucket",
+       "Description": "[DO NOT CHANGE] SSM Parameter for bucket location"
+     },
+    "pDXCServiceTier": {
+       "Type": "AWS::SSM::Parameter::Value<String>",
+       "Default": "/DXC/Main/pDXCServiceTier",
+       "Description": "SSM Parameter for Platform Service Tier."
+     },
+     "pFeatureVersion": {
+      "Type": "String",
+      "Default": "None",
+      "Description": "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+    },
+    "pDXCS3KeyPrefix": {
+      "Type": "String",
+      "Default": "None",
+      "Description": "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+    },
+    "pAmisRetentionPeriod": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/DXC/Main/AmisRetentionPeriod",
+      "Description": "SSM Parameter for Length of Time to Retain Hardened Amis."
+    }
+   },
+   
+   "Mappings": {
+    "Document2Region": {
+       "us-east-1":         { "DocumentName": "DocumentPresent"     },
+       "us-east-2":         { "DocumentName": "DocumentPresent"     },
+       "us-west-1":         { "DocumentName": "DocumentPresent"     },
+       "us-west-2":         { "DocumentName": "DocumentPresent"     },
+       "eu-west-1":         { "DocumentName": "DocumentPresent"     },
+       "eu-central-1":      { "DocumentName": "DocumentPresent"     },
+       "ap-northeast-1":    { "DocumentName": "DocumentPresent"     },
+       "ap-northeast-2":    { "DocumentName": "DocumentPresent"     },
+       "ap-southeast-1":    { "DocumentName": "DocumentPresent"     },
+       "ap-southeast-2":    { "DocumentName": "DocumentPresent"     },
+       "sa-east-1":         { "DocumentName": "DocumentPresent"     },
+       "ap-south-1":        { "DocumentName": "DocumentPresent" },
+       "eu-west-2" :        { "DocumentName": "DocumentPresent" },
+       "eu-west-3" :        { "DocumentName": "DocumentPresent" },
+       "ca-central-1":      { "DocumentName": "DocumentPresent" },
+       "me-south-1":        { "DocumentName": "DocumentPresent" },
+       "ap-northeast-3":    { "DocumentName": "DocumentPresent" },
+       "eu-north-1":        { "DocumentName": "DocumentPresent" },
+       "eu-south-1":        { "DocumentName": "DocumentPresent" }
+    }
+ },
+ "Resources":{
+ 
+       "rManagedInstanceRole" : {
+          "Type":"AWS::IAM::Role",
+          "Properties":{
+             "AssumeRolePolicyDocument": {
+                "Version" : "2012-10-17",
+                "Statement" : [
+                  {
+                   "Effect": "Allow",
+                   "Principal": {
+                      "Service": [
+                         "ssm.amazonaws.com",
+                         "ec2.amazonaws.com"
+                       ]
+                   },
+                   "Action": "sts:AssumeRole"
+                  }
+                 ]
+              },
+              "ManagedPolicyArns" : [
+                 "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+                 "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess",
+                 "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+                 "arn:aws:iam::aws:policy/service-role/AmazonSSMMaintenanceWindowRole"
+              ],
+              "Path" : "/",
+              "Policies": [
+                {          
+                  "PolicyName": "ManagedInstancePolicy",
+                  "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                      {
+                        "Effect": "Allow",
+                        "Action": [
+                          "s3:GetBucketLocation",
+                          "s3:PutObject",
+                          "s3:GetObject",
+                          "s3:GetEncryptionConfiguration",
+                          "s3:AbortMultipartUpload",
+                          "s3:ListMultipartUploadParts",
+                          "s3:ListBucket",
+                          "s3:ListBucketMultipartUploads",
+                          "ec2:DescribeImages",
+                          "ec2:CreateTags"
+                          ], 
+                        "Resource": "*"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+       },
+       "rManagedInstanceProfile" : {
+          "Type" : "AWS::IAM::InstanceProfile",
+          "Properties": {
+             "Path" : "/",
+             "Roles" : [ { "Ref" : "rManagedInstanceRole" } ]
+          },
+          "DependsOn" : "rManagedInstanceRole"
+       },
+       "rAutomationServiceRole" : {
+          "Type":"AWS::IAM::Role",
+          "DependsOn" : "rManagedInstanceRole",
+          "Properties":{
+             "AssumeRolePolicyDocument": {
+                "Version" : "2012-10-17",
+                "Statement" : [
+                  {
+                   "Effect": "Allow",
+                   "Principal": {
+                      "Service": [
+                         "ssm.amazonaws.com",
+                         "ec2.amazonaws.com"
+                       ]
+                   },
+                   "Action": "sts:AssumeRole"
+                  }
+                 ]
+              },
+              "ManagedPolicyArns" : [ "arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole"],
+              "Path" : "/",
+              "Policies" : [
+                {
+                 "PolicyName" : "passrole",
+                 "PolicyDocument" : {
+                    "Version" : "2012-10-17",
+                    "Statement" : [
+                       {
+                         "Effect": "Allow",
+                         "Action": [
+                           "iam:PassRole"
+                          ],
+                          "Resource" : [
+                             { "Fn::GetAtt" : "rManagedInstanceRole.Arn" }
+                          ]
+                        }
+                       ]
+                   }
+                 }
+               ]
+     }
+       },
+       "rGetSourceImage": {
+         "Type": "Custom::rGetSourceImage",
+         "Properties": {
+           "ServiceToken": {
+             "Fn::Join": ["", ["arn:aws:lambda:", {"Ref": "AWS::Region"},":",{"Ref": "AWS::AccountId"},":function:getSourceImage"]]
+           },
+           "OSName": "win2016",
+           "BucketName": { "Ref": "pDXCS3MainBucketName" },
+           "Region": { "Ref": "AWS::Region" }
+         }
+       },
+     "rGetAllSourceImage": {
+       "Type": "Custom::rGetAllSourceImage",
+       "Properties": {
+         "ServiceToken": {
+           "Fn::Join": ["", ["arn:aws:lambda:", {"Ref": "AWS::Region"}, ":", {"Ref": "AWS::AccountId"}, ":function:getSourceImage"]]
+         },
+         "OSName": "win",
+         "BucketName": {
+           "Ref": "pDXCS3MainBucketName"
+         },
+         "Region": {
+           "Ref": "AWS::Region"
+         }
+       }
+     },
+       "rCreateGoldWindowsAMIAutomation": {
+          "Type":"AWS::SSM::Document",
+          "DependsOn" : ["rAutomationServiceRole", "rManagedInstanceProfile"],
+          "Properties":{
+             "DocumentType" : "Automation",
+             "Content":{
+   "schemaVersion": "0.3",
+   "description": "Updates a Microsoft Windows AMI. By default it will install all Windows updates, Amazon software, and Amazon drivers. It will then sysprep and create a new AMI. Supports Windows Server 2008 R2 and greater.",
+   "assumeRole": { "Fn::GetAtt" : "rAutomationServiceRole.Arn" },
+   "parameters": {
+   "AvailableSourceAmiId": {
+     "type": "String",
+     "description": "These are the available AMI Id's for selected Region and OS. Please use these to fill up SourceAmiId.",
+     "allowedValues": {
+     "Fn::GetAtt": [
+       "rGetAllSourceImage",
+       "Image"
+     ]
+     }
+   },
+     "SourceAmiId": {
+       "type": "String",
+       "description": "(REQUIRED) Refer AvailableSourceAmiId section to get correct AMI Id for your OS.",
+       "default": "<Enter-AMI-Id>"
+     },
+     "TargetAmiName": {
+         "type": "String",
+         "description": "(Optional) The name of the new AMI that will be created. Default is a system-gbenerated string including 'QS-CoRE-WINDOWS', and the creation time and date.",
+         "default": "QS-CoRE-WINDOWS"
+     },
+     "InstanceType": {
+         "type": "String",
+         "description": "(Optional) Type of instance to launch as the workspace host. Instance types vary by region. Default is t2.medium.",
+         "default": "t2.medium"
+     },
+     "CustomerBucket" : {
+       "type" : "String",
+       "default" : { "Fn::Join" : ["", ["dxc.customer.config-", { "Ref" : "AWS::AccountId" }, "-", { "Ref" : "AWS::Region" } ]] }
+     },
+     "CDSBucket" : {
+      "type" : "String",
+      "default" : { "Ref" : "pDXCS3CDSBucketName" }
+    },
+    "FeatureVersion" : {
+      "type" : "String",
+      "description": "[DO NOT CHANGE] Version of the Feature",
+      "default" : { "Ref" : "pFeatureVersion" }
+    },  
+    "OSName" : {
+       "type" : "String",
+       "allowedValues":[ "win2016","win2019","win2022" ]
+     },
+     "AMIVersion" : {
+       "type" : "String",
+       "description": "Represents version of the AMI. Useful when there are multiple AMIs of an operating system in a region.",
+       "default" : "v1.0"
+     },
+     "Environment" : {
+       "type" : "String",
+       "description": "(Required) Represents AMI Environment. Allowed values are ['QA', 'Staging', 'Production']",
+       "allowedValues" : [ "QA", "Staging", "Production" ]
+     },
+     "Encryption": {
+      "allowedValues": [
+        "true",
+        "false"
+      ],
+      "default": "false",
+      "description": "Set True for root volume encryption",
+      "type": "String"
+    },
+     "RetentionPeriod": {
+       "type": "String",
+       "default": { "Ref" : "pAmisRetentionPeriod" },
+       "description": "Retention period of the Custom AMI"
+     }
+ 
+   },
+   "mainSteps": [
+    {
+      "maxAttempts": 3,
+      "inputs": {
+        "Service": "ssm",
+        "Api": "get_parameter",
+        "Name": "/DXC/Hardening/SubnetId"
+      },
+      "name": "GetSubnetId",
+      "action": "aws:executeAwsApi",
+      "timeoutSeconds": 1200,
+      "onFailure": "Abort",
+      "outputs": [
+        {
+          "Name": "SubnetId",
+          "Selector": "$.Parameter.Value",
+          "Type": "String"
+        }
+      ]
+    },
+    {
+      "maxAttempts": 3,
+      "inputs": {
+        "Service": "ssm",
+        "Api": "get_parameter",
+        "Name": "/DXC/Hardening/SecurityGroupId"
+      },
+      "name": "GetSecurityGroup",
+      "action": "aws:executeAwsApi",
+      "timeoutSeconds": 1200,
+      "onFailure": "Abort",
+      "outputs": [
+        {
+          "Name": "SecurityGroup",
+          "Selector": "$.Parameter.Value",
+          "Type": "String"
+        }
+      ]
+    },
+    {
+      "maxAttempts": 3,
+      "inputs": {
+        "Service": "ssm",
+        "Api": "get_parameter",
+        "Name": "/DXC/Hardening/KeyPair"
+      },
+      "name": "GetKeyPair",
+      "action": "aws:executeAwsApi",
+      "timeoutSeconds": 1200,
+      "onFailure": "Abort",
+      "outputs": [
+        {
+          "Name": "KeyName",
+          "Selector": "$.Parameter.Value",
+          "Type": "String"
+        }
+      ] 
+    },
+     {
+       "name": "LaunchInstance",
+       "action": "aws:runInstances",
+       "timeoutSeconds": 1800,
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "inputs": {
+         "KeyName": "{{GetKeyPair.KeyName}}",
+         "ImageId": "{{ SourceAmiId  }}",
+         "InstanceType": "{{ InstanceType }}",
+         "MinInstanceCount": 1,
+         "MaxInstanceCount": 1,
+         "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "Encrypted": "{{Encryption}}"
+            }
+          }
+        ],
+         "IamInstanceProfileName": { "Ref" : "rManagedInstanceProfile" },
+         "SubnetId" : "{{ GetSubnetId.SubnetId }}",
+         "SecurityGroupIds" : [ "{{ GetSecurityGroup.SecurityGroup }}" ]
+       }
+     },
+    {
+       "name": "UpdateSSMAgent",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 600,
+       "inputs": {
+         "DocumentName": "AWS-UpdateSSMAgent",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "Parameters" : {
+            "allowDowngrade" : "false"
+         }
+       }
+     },
+     {
+      "maxAttempts" : 3,
+      "inputs" : {
+        "Parameters" : {
+          "executionTimeout" : "7200",
+          "commands" : [ 
+            "New-Item \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.0\\Server\" -Force | Out-Null",
+            "New-ItemProperty -path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.0\\Server\" -name 'Enabled' -value '0' -PropertyType 'DWord' -Force | Out-Null",
+            "New-ItemProperty -path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.0\\Server\" -name 'DisabledByDefault' -value 1 -PropertyType 'DWord' -Force | Out-Null",
+            "New-Item \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.0\\Client\" -Force | Out-Null",
+            "New-ItemProperty -path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.0\\Client\" -name 'Enabled' -value '0' -PropertyType 'DWord' -Force | Out-Null",
+            "New-ItemProperty -path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.0\\Client\" -name 'DisabledByDefault' -value 1 -PropertyType 'DWord' -Force | Out-Null",
+            "Write-Host 'TLS 1.0 has been disabled.'",
+            
+            "New-Item \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.1\\Server\" -Force | Out-Null",
+            "New-ItemProperty -path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.1\\Server\" -name 'Enabled' -value '0' -PropertyType 'DWord' -Force | Out-Null",
+            "New-ItemProperty -path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.1\\Server\" -name 'DisabledByDefault' -value 1 -PropertyType 'DWord' -Force | Out-Null",
+            "New-Item \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.1\\Client\" -Force | Out-Null",
+            "New-ItemProperty -path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.1\\Client\" -name 'Enabled' -value '0' -PropertyType 'DWord' -Force | Out-Null",
+            "New-ItemProperty -path \"HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.1\\Client\" -name 'DisabledByDefault' -value 1 -PropertyType 'DWord' -Force | Out-Null",
+            "Write-Host 'TLS 1.1 has been disabled.'",
+            
+            "New-ItemProperty -path \"HKLM:\\SOFTWARE\\Microsoft\\.NetFramework\\v4.0.30319\" -name 'SchUseStrongCrypto' -value '1' -PropertyType 'DWord' -Force | Out-Null",
+            "Write-Host 'TLS 1.2 has been ENABLED.'"
+            ]
+        },
+        "InstanceIds" : [ "{{ LaunchInstance.InstanceIds }}" ],
+        "DocumentName" : "AWS-RunPowerShellScript"
+      },
+      "name" : "TLS12Update",
+      "action" : "aws:runCommand",
+      "onFailure" : "Abort",
+      "timeoutSeconds" : 7200
+    },
+     {
+       "name": "UpdateEC2Config",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 7200,
+       "inputs": {
+        "DocumentName": "AWS-InstallPowerShellModule",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "Parameters": {
+           "executionTimeout": "7200",
+           "source": "https://aws-windows-downloads-{{global:REGION}}.s3.amazonaws.com/PSModules/AWSUpdateWindowsInstance/AWSUpdateWindowsInstance_1_4_4_0.zip",
+           "sourceHash": "CD337ADCFBA463DE895B8D8248A3991940ABB03ADF8525ECA1302385D6A1DDA6",
+           "commands": [
+             "Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Force",
+             "Import-Module AWSUpdateWindowsInstance",
+             "if ([Environment]::OSVersion.Version.Major -ge 10) {",
+             "  Install-AwsUwiEC2Launch -Id {{ automation:EXECUTION_ID }}",
+             "} else {",
+             "  Install-AwsUwiEC2Config -Id {{ automation:EXECUTION_ID }}",
+             "}"
+           ]
+         }
+       }
+     },
+ {
+       "name": "EC2LaunchInitializeDisks",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 600,
+       "inputs": {
+         "DocumentName": "AWS-RunPowerShellScript",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "Parameters": {
+           "commands": [
+         "if ([Environment]::OSVersion.Version.Major -ge 10) {",
+       "Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Force",
+       "$mydir = \"C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Scripts\" \n",
+       "Write-Host \"directory $mydir \" \n",
+       " cd $mydir \n",
+       ".\\InitializeDisks.ps1 -Schedule \n",
+       "Write-Host \"Successfully run the script\" \n",
+       "} else {",
+       "Write-Host \"This Step is applicable only for Windows 2016\" \n",
+       "}"
+       ]
+     }
+     }
+   },
+     {
+       "name": "UpdateAWSPVDriver",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 600,
+       "inputs": {
+         "DocumentName": "AWS-ConfigureAWSPackage",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "Parameters": {
+           "name": "AWSPVDriver",
+           "action": "Install"
+         }
+       }
+     },
+     {
+      "name": "InstallAwsVssComponents",
+      "action": "aws:runCommand",
+      "maxAttempts": 3,
+      "onFailure": "Abort",
+      "timeoutSeconds": 14400,
+      "inputs": {
+        "DocumentName": "AWS-ConfigureAWSPackage",
+        "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+        "Parameters": {
+          "name": "AwsVssComponents",
+          "action": "Install"
+        }
+      }
+    },
+    {
+      "name": "AmazonCloudWatchAgentInstall",
+      "action": "aws:runCommand",
+      "maxAttempts": 3,
+      "onFailure": "Abort",
+      "timeoutSeconds": 14400,
+      "inputs": {
+        "DocumentName": "AWS-ConfigureAWSPackage",
+        "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+        "Parameters": {
+          "name": "AmazonCloudWatchAgent",
+          "action": "Install"
+        }
+      }
+    },
+     {
+       "name": "InstallWindowsUpdates",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 14400,
+       "inputs": {
+         "DocumentName": "AWS-InstallWindowsUpdates",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"]
+       }
+     },
+     {
+       "name": "InstallPython",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 600,
+       "inputs": {
+         "DocumentName": "AWS-RunPowerShellScript",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "Parameters": {
+           "commands": [
+ 
+ "$TOKEN = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '600'} -Method PUT -Uri http://169.254.169.254/latest/api/token\n",
+ "$region = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $TOKEN} -Method GET -Uri http://169.254.169.254/latest/meta-data/placement/region\n", 
+ 
+ "$dxc_bucket=\"{{CustomerBucket}}\"\n",
+ "$dxc_cdsbucket=\"{{CDSBucket}}\"\n",
+ "New-Item -ItemType directory -Path \"C:\\Temp\" -Force\n",
+ "$pythonExe=\"python-3.9.2-amd64.exe\"\n",
+ "Copy-S3Object -BucketName $dxc_bucket -key deploy/externs/$pythonExe -Region $region -LocalFile \"c:\\Temp\\${pythonExe}\"\n",
+ "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass \n",
+ "$work=\"c:\\Temp\\${pythonExe} /quiet /passive InstallAllUsers=1 PrependPath=1 \" \n",
+ "iex $work \n",
+ "Start-Sleep -s 120 \n",
+ "$PATH=[Environment]::GetEnvironmentVariable(\"PATH\") \n",
+ "Write-Host $PATH\n",
+ "$mydir=\"C:\\Program Files\\Python39\" \n",
+ "Write-Host \"directory $mydir \" \n",
+ "[Environment]::SetEnvironmentVariable(\"PATH\", \"$mydir;${mydir}\\Scripts\") \n",
+ "$PythonVer=python --version\n",
+ "Write-Host \"Python\" \n",	"Write-Host $PythonVer is installed\n"
+ ]
+ } }
+ },
+ {
+   "name": "InstallAWSCLIv2",
+   "action": "aws:runCommand",
+   "maxAttempts": 3,
+   "onFailure": "Abort",
+   "timeoutSeconds": 600,
+   "inputs": {
+     "DocumentName": "AWS-RunPowerShellScript",
+     "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+     "Parameters": {
+       "commands": [
+ "New-Item C:\\Temp -ErrorAction SilentlyContinue",
+ "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls12",
+ "Invoke-WebRequest https://awscli.amazonaws.com/AWSCLIV2.msi -OutFile C:\\temp\\AWSCLIV2.msi \n",
+ "start-Process -FilePath \"msiexec.exe\" -ArgumentList '/i C:\\Temp\\AWSCLIV2.msi  /quiet /norestart /l C:\\Temp\\installlog.txt' \n",
+ "Write-Host \"Done install\" \n"
+ ]
+ } }
+ },
+ {
+       "name": "LocalEC2Config",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 600,
+       "inputs": {
+         "DocumentName": "AWS-RunPowerShellScript",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "Parameters": {
+           "commands": [
+ 
+ "$TOKEN = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '600'} -Method PUT -Uri http://169.254.169.254/latest/api/token\n",
+ "$region = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $TOKEN} -Method GET -Uri http://169.254.169.254/latest/meta-data/placement/region\n", 
+
+ "$fileName=\"C:\\Program Files\\Amazon\\Ec2ConfigService\\Settings\\config.xml\" \n",
+ "$dxc_cdsbucket=\"{{CDSBucket}}\"\n",
+ "$featureversion=\"{{FeatureVersion}}\"\n",
+ "Write-Host \"CDSBucket:$dxc_cdsbucket \" \n",
+ "Write-Host \"S3BucketKey : deploy/standards/feature-HardenedAMIWindows/$featureversion/feature__hardened_ami_windows/lambda_functions/automation/documents/config.xml\" \n",
+ "Read-S3Object -BucketName $dxc_cdsbucket -Key deploy/standards/feature-HardenedAMIWindows/$featureversion/feature__hardened_ami_windows/lambda_functions/automation/documents/config.xml -File \"$fileName\" -Region $region \n"
+ 
+ ] }
+ } }
+ ,
+ 
+ {
+       "name": "CloudWatchLogs",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 600,
+       "inputs": {
+         "DocumentName": "AWS-RunPowerShellScript",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "Parameters": {
+           "commands": [
+ 
+ "$TOKEN = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '600'} -Method PUT -Uri http://169.254.169.254/latest/api/token\n",
+ "$region = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $TOKEN} -Method GET -Uri http://169.254.169.254/latest/meta-data/placement/region\n", 
+ 
+ 
+ "$fileName=\"C:\\Program Files\\Amazon\\SSM\\Plugins\\awsCloudWatch\\AWS.EC2.Windows.CloudWatch.json\" \n",
+ "$bucket=\"{{CustomerBucket}}\" \n",
+ "Read-S3Object -BucketName $bucket -Key deploy/documents/AWS.EC2.Windows.CloudWatch.json -File \"$fileName\" -Region $region \n",
+ "$content=[System.IO.File]::ReadAllText(\"$fileName\") \n",
+ "$content=$content.Replace(\"us-east-1\", $region) \n",
+ "[System.IO.File]::WriteAllText(\"$fileName\", $content) \n"
+ ] }
+ } },
+ 
+ {
+       "name": "SOEHardening",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 600,
+       "inputs": {
+         "DocumentName": "AWS-RunPowerShellScript",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "Parameters": {
+           "commands": [
+ 
+ "Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Force",
+ "Import-Module -Name AWSPowerShell",            
+ "New-Item C:\\TEMP\\soe -type directory -force \n",
+ "$TOKEN = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '600'} -Method PUT -Uri http://169.254.169.254/latest/api/token\n",
+ "$region = Invoke-RestMethod -Headers @{'X-aws-ec2-metadata-token' = $TOKEN} -Method GET -Uri http://169.254.169.254/latest/meta-data/placement/region\n",
+ "$dxccdsbucket=\"{{CDSBucket}}\"\n",
+ "Write-Host $dxccdsbucket \n",
+ "$featureversion=\"{{FeatureVersion}}\"\n",
+ "Write-Host \"S3BucketKey : deploy/standards/feature-HardenedAMIWindows/$featureversion/feature__hardened_ami_windows/lambda_functions/automation/soe-hardening/windows/corecm\" \n",
+ "Copy-S3Object -BucketName $dxccdsbucket -Key deploy/standards/feature-HardenedAMIWindows/$featureversion/feature__hardened_ami_windows/lambda_functions/automation/soe-hardening/windows/corecm/SMCommon.psm1 -Region $region -LocalFile \"c:\\TEMP\\soe\\SMCommon.psm1\" \n",
+ "Copy-S3Object -BucketName $dxccdsbucket -Key deploy/standards/feature-HardenedAMIWindows/$featureversion/feature__hardened_ami_windows/lambda_functions/automation/soe-hardening/windows/corecm/SETUP.PS1 -Region $region -LocalFile \"c:\\TEMP\\soe\\SETUP.PS1\" \n",
+ "Copy-S3Object -BucketName $dxccdsbucket -Key deploy/standards/feature-HardenedAMIWindows/$featureversion/feature__hardened_ami_windows/lambda_functions/automation/soe-hardening/windows/corecm/CoRECM.zip -Region $region -LocalFile \"c:\\TEMP\\soe\\CoRECM.zip\" \n",
+ "cd c:\\TEMP\\soe \n",
+ ".\\SETUP.PS1 \n",
+ "Start-sleep -s 15 \n",
+ "cd c:\\SUPPORT\\CoRECM \n",
+ ".\\wcremediation.ps1 -DetectBaseline -RemediateAll -RelaxSecurityinWorkGroup -IgnoreRescan -confirm:$false\n",
+ "Start-sleep -s 30 \n",
+ "Restart-Computer -Force \n"
+ 
+ ] }
+ } },
+ 
+ 
+     {
+       "name": "RunSysprepGeneralize",
+       "action": "aws:runCommand",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "timeoutSeconds": 7200,
+       "inputs": {
+         "DocumentName": "AWS-InstallPowerShellModule",
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "Parameters": {
+           "executionTimeout": "7200",
+           "source": "https://aws-windows-downloads-{{global:REGION}}.s3.{{global:REGION}}.amazonaws.com/PSModules/AWSUpdateWindowsInstance/AWSUpdateWindowsInstance_1_4_4_0.zip",
+           "sourceHash": "CD337ADCFBA463DE895B8D8248A3991940ABB03ADF8525ECA1302385D6A1DDA6",
+           "commands": [
+             "Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Force",
+             "Import-Module AWSUpdateWindowsInstance",
+             "Start-AwsUwiSysprep -Id {{ automation:EXECUTION_ID }}"
+           ]
+         }
+       }
+     },
+     {
+      "name": "ApplyPatches",
+      "action": "aws:runCommand",
+      "onFailure": "Abort",
+      "timeoutSeconds": 7200,
+      
+      "maxAttempts": 3,
+       "inputs": {
+          "Parameters": {
+             "Operation": "Install",
+             "RebootOption": "NoReboot"
+          },
+          "InstanceIds": [
+             "{{LaunchInstance.InstanceIds}}"
+          ],
+          "DocumentName": "AWS-RunPatchBaseline"
+      }
+    },
+     {
+       "name":"StopInstance",
+       "action": "aws:changeInstanceState",
+       "maxAttempts": 3,
+       "timeoutSeconds": 7200,
+       "onFailure": "Abort",
+       "inputs": {
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "CheckStateOnly": false,
+         "DesiredState": "stopped"
+       }
+     },
+     {
+       "name":"CreateImage",
+       "action": "aws:createImage",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "inputs": {
+         "InstanceId": "{{ LaunchInstance.InstanceIds }}",
+         "ImageName":  "{{ TargetAmiName }}-{{AMIVersion}}",
+         "NoReboot": true,
+         "ImageDescription": "Test CreateImage Description"
+       }
+     },
+     {
+       "name":"StartInstance",
+       "action":"aws:changeInstanceState",
+       "maxAttempts":3,
+       "timeoutSeconds":1200,
+       "onFailure":"Abort",
+       "inputs":{
+         "InstanceIds":[
+           "{{LaunchInstance.InstanceIds}}"
+         ],
+         "DesiredState":"running"
+       }
+     },
+     {
+      "name":"DeleteOnTagValue",
+      "action":"aws:runCommand",
+      "maxAttempts":3,
+      "timeoutSeconds":3600,
+      "onFailure": "Abort",
+      "inputs":{
+        "DocumentName":"AWS-RunPowerShellScript",
+        "InstanceIds":[
+          "{{LaunchInstance.InstanceIds}}"
+        ],
+        "Parameters":{
+          "commands":[
+            "$dateFormat = 'yyyy-MM-dd'",
+            "$date = (Get-Date).AddDays(+{{RetentionPeriod}})",
+            "$deleteontag=Get-Date -Date $date -Format $dateFormat",
+            "Write-Host $deleteontag"
+          ]}
+        }
+    },
+     {
+       "name":"TagSnapshot",
+       "action":"aws:runCommand",
+       "maxAttempts":3,
+       "timeoutSeconds":3600,
+       "onFailure": "Abort",
+       "inputs":{
+         "DocumentName":"AWS-RunPowerShellScript",
+         "InstanceIds":[
+           "{{LaunchInstance.InstanceIds}}"
+         ],
+         "Parameters":{
+           "commands":[
+             "$ServiceName = 'AmazonSSMAgent'",
+             "$arrService = Get-Service -Name $ServiceName",
+             "if($arrService.Status -ne 'Running')",
+             "{",
+             " $ServiceStarted = $false",
+             "}",
+             "Else",
+             "{",
+             " $ServiceStarted = $true",
+             "}",
+             "while ($ServiceStarted -ne $true)",
+             "{",
+             "  Start-Service $ServiceName",
+             "  write-host $arrService.status",
+             "  write-host 'Service started'",
+             "  Start-Sleep -seconds 30",
+             "}",
+             "$arrService = Get-Service -Name $ServiceName",
+             "if ($arrService.Status -eq 'Running')",
+             "{",
+             "  write-host $arrService.status",
+             "}",
+             "$myImage = Get-EC2Image {{ CreateImage.ImageId }}",
+             "$snapId=$myImage[0].BlockDeviceMappings[0].Ebs.SnapshotId",
+             "$Tags = @( @{Key=\"Application\";Value=\"\"}, @{Key=\"Compliance\";Value=\"\"}, @{Key=\"InstanceName\";Value=\"\"}, @{Key=\"MountPoint\";Value=\"\"}, @{Key=\"VolumeName\";Value=\"\"}, @{Key=\"Owner\";Value=\"\"}, @{Key=\"Environment\";Value=\"\"}, @{Key=\"Project\";Value=\"\"}, @{Key=\"DeleteOn\";Value=\"{{ DeleteOnTagValue.Output }}\"}, @{Key=\"Encrypted\";Value=\"{{ Encryption }}\"}, @{Key=\"Name\";Value=\"AMI: {{ CreateImage.ImageId }}\"})",
+             "Write-Host \"Tagging snapshotId - $snapId\" ",
+             "New-EC2Tag -ResourceId $snapId -Tags $Tags"
+           ]}
+         }
+     },
+     {
+       "name": "TagImage",
+       "action": "aws:createTags",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "inputs": {
+         "ResourceType": "EC2",
+         "ResourceIds": ["{{ CreateImage.ImageId }}"],
+         "Tags": [
+           {
+             "Key": "Original_AMI_ID",
+             "Value": "Created from {{ SourceAmiId }}"
+           },
+           
+           {
+             "Key" : "os",
+             "Value" : "{{OSName}}"
+           },
+           {
+             "Key" : "version",
+             "Value" : "{{AMIVersion}}"
+           },
+           {
+             "Key" : "osservicelevel",
+             "Value" : "GOLD"
+           },
+           {
+             "Key" : "encrypted",
+             "Value" : "{{Encryption}}"
+           },
+           {
+             "Key" : "Environment",
+             "Value" : "{{Environment}}"
+           },
+           {
+             "Key" : "DeleteOn",
+             "Value" : "{{DeleteOnTagValue.Output}}"
+           }
+         ]
+       }
+     },
+     {
+       "name":"TerminateInstance",
+       "action": "aws:changeInstanceState",
+       "maxAttempts": 3,
+       "onFailure": "Abort",
+       "inputs": {
+         "InstanceIds": ["{{ LaunchInstance.InstanceIds }}"],
+         "DesiredState": "terminated"
+       }
+     }
+   ],
+   "outputs":["CreateImage.ImageId"]
+ }
+ }
+ }
+ }
+ }
+ 

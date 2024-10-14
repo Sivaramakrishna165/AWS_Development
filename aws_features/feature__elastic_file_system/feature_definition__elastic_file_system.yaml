@@ -1,0 +1,55 @@
+---
+# Feature Definition (FD) for ElasticFileSystem
+# This feature creates an Amazon Elastic File System
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: ElasticFileSystem 
+FeatureParams:
+  ## Parameters for DynamoDB, duplicated in definition file
+  pFtEfsSubnetId:
+    Description: 'Leave default to automatically use Workload VPC v2 private subnet A. If entering pFtEfsVpcId then pFtEfsSubnetId must also be set'
+    Type: String
+    Default: 'dummy'
+  pFtEfsVpcId:
+    Description: 'Leave default to automatically use Workload VPC v2. If entering your own pFtEfsVpcId then pFtEfsSubnetId must also be set'
+    Type: String
+    Default: 'dummy'
+  pFtEfsBackupPolicy:
+    Description: 'Enables or disables EFS backups'
+    Type: String
+    Default: 'ENABLED'
+    AllowedValues: ['ENABLED', 'DISABLED']
+  pFtEfsEncryption:
+    Description: 'DO NOT CHANGE, Setting to True will use the default KMS key for Amazon EFS to encrypt the filesystem.'
+    Type: String
+    Default: True
+  pFtEfsPerformanceMode:
+    Description: 'The performance mode of the file system.  maxIO has higher latencies.  Cannot be changed once the filesystem is created '
+    Type: String
+    Default: 'generalPurpose'
+    AllowedValues: ['generalPurpose', 'maxIO']
+  pFtEfsThroughputMode:
+    Description: 'Set to bursting by default for lowest cost with unknown workload traffic'
+    Type: String
+    Default: 'bursting'
+    AllowedValues: ['bursting', 'elastic', 'provisioned']
+  pFtEfsProvisionedThroughputInMibps:
+    Description: "Not used for bursting throughput mode. The throughput, measured in MiB/s, that you want to provision for a file system that you're creating. Valid values are 1-1024. Cannot decrease it"
+    Type: Number
+    Default: 9999
+
+Version: '9.0.0.2'
+StandardCreationBatch: 2
+EnableFeature: false
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: This feature creates an Amazon Elastic File System
+AllowDisable: True
+ResourceDeployment:
+  - elastic_file_system.yaml

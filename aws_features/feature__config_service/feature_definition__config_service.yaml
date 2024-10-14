@@ -1,0 +1,30 @@
+---
+# Feature Definition (FD) for the AWS Health Events feature
+# This is a feature that to create AWS Config Service
+# Partition Key = Feature
+# No sort key needed
+
+Feature: ConfigService
+Version: '8.0.0.7'
+StandardCreationBatch: 1
+EnableFeature: true
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: AWS Config service as a feature
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - AWSConfig.yaml

@@ -1,0 +1,435 @@
+{
+  "Comment": "This Step Function will Perform the Health Checks on the EC2 Instances.",
+  "StartAt": "perform_health_checks",
+  "States": {
+    "perform_health_checks": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${perform_health_checks}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 300,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "perform_health_checks_error"
+        }
+      ],
+      "Next": "Wait"
+    },
+    "perform_health_checks_error": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "State.$": "$$.State",
+        "ErrorMessageFrom": "perform_health_checks Function"
+      },
+      "Next": "Notify_Failure"
+    },
+    "Wait": {
+      "Type": "Wait",
+      "Seconds": 300,
+      "Next": "check_hc_ssm_command_status"
+    },
+    "check_hc_ssm_command_status": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${check_hc_ssm_command_status}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 300,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "check_hc_ssm_command_status_error"
+        }
+      ],
+      "Next": "check_command_status"
+    },
+    "check_hc_ssm_command_status_error": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "State.$": "$$.State",
+        "ErrorMessageFrom": "check_hc_ssm_command_status Function"
+      },
+      "Next": "Notify_Failure"
+    },
+    "check_command_status": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Status",
+          "StringEquals": "completed",
+          "Next": "generate_health_check_report"
+        },
+        {
+          "Variable": "$.Status",
+          "StringEquals": "pending",
+          "Next": "Check_count"
+        }
+      ]
+    },
+    "Check_count": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Count",
+          "NumericEquals": 0,
+          "Next": "terminate_hc_ssm_command"
+        },
+        {
+          "Variable": "$.Count",
+          "NumericGreaterThan": 0,
+          "Next": "Wait_for_trigger_statuscheck"
+        }
+      ]
+    },
+    "Wait_for_trigger_statuscheck": {
+      "Type": "Wait",
+      "Seconds": 600,
+      "Next": "check_hc_ssm_command_status"
+    },
+    "generate_health_check_report": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${generate_health_check_report}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 300,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "generate_health_check_report_error"
+        }
+      ],
+      "Next": "process_hc_reports"
+    },
+    "generate_health_check_report_error": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "State.$": "$$.State",
+        "ErrorMessageFrom": "generate_health_check_report Function"
+      },
+      "Next": "Notify_Failure"
+    },
+    "terminate_hc_ssm_command": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${terminate_hc_ssm_command}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 300,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "terminate_hc_ssm_command_error"
+        }
+      ],
+      "Next": "generate_health_check_report"
+    },
+    "terminate_hc_ssm_command_error": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "State.$": "$$.State",
+        "ErrorMessageFrom": "terminate_hc_ssm_command Function"
+      },
+      "Next": "Notify_Failure"
+    },
+    "process_hc_reports": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${process_hc_reports}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 300,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "process_hc_reports_error"
+        }
+      ],
+      "Next": "server_health_check_result"
+    },
+    "process_hc_reports_error": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "State.$": "$$.State",
+        "ErrorMessageFrom": "process_hc_reports Function"
+      },
+      "Next": "Notify_Failure"
+    },
+    "server_health_check_result": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${server_health_check_result}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 300,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "server_health_check_result_error"
+        }
+      ],
+      "Next": "generate_unique_name_for_health_check_SFN"
+    },
+    "server_health_check_result_error": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "State.$": "$$.State",
+        "ErrorMessageFrom": "server_health_check_result Function"
+      },
+      "Next": "Notify_Failure"
+    },
+    "generate_unique_name_for_health_check_SFN": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${generate_unique_name_for_health_check_SFN}",
+        "Payload": {
+          "Payload.$": "$",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 300,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "generate_unique_name_for_health_check_SFN_error"
+        }
+      ],
+      "Next": "Call_SFN_to_perform_service_health_check"
+    },
+    "generate_unique_name_for_health_check_SFN_error": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "State.$": "$$.State",
+        "ErrorMessageFrom": "generate_unique_name_for_health_check_SFN Function"
+      },
+      "Next": "Notify_Failure"
+    },
+    "Call_SFN_to_perform_service_health_check": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::states:startExecution.sync:2",
+      "Parameters": {
+        "StateMachineArn": "${Call_SFN_to_perform_service_health_check}",
+        "Name.$": "$.SubSFName",
+        "Input": {
+          "S3_Bucket.$": "$.S3_Bucket",
+          "S3_directory_name.$": "$.S3_directory_name",
+          "uniqueID.$":"$.uniqueID"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "Call_SFN_to_perform_service_health_check_error"
+        }
+      ],
+      "ResultPath": "$.Output",
+      "End": true
+    },
+    "Call_SFN_to_perform_service_health_check_error": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "State.$": "$$.State",
+        "ErrorMessageFrom": "Call_SFN_to_perform_health_check"
+      },
+      "Next": "Notify_Failure"
+    },
+    "Notify_Failure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 1.5
+        }
+      ],
+      "Parameters": {
+        "Message.$": "$",
+        "TopicArn": "${Notify_Failure}"
+      },
+      "End": true
+    }
+  }
+}

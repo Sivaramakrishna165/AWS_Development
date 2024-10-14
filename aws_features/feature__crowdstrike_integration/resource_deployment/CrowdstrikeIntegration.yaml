@@ -1,0 +1,656 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: DXC Managed Services - Integration of Crowdstrike with Security Hub
+
+Parameters:
+
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/CrowdstrikeIntegration/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+
+  pPlatformVersion:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Main/pPlatformVersion
+    Description: "[DO NOT CHANGE] SSM Parameter for platform version"
+
+  pSESLayerArn:
+    Type : 'AWS::SSM::Parameter::Value<String>'
+    Description: "SSM parameter for Lambda Layer ARN"
+    Default: /DXC/SES/SESLayerLambdaArn
+
+  InstanceType:
+    Type: String
+    Default: "t2.large"
+    Description: 'Instance type of the FIG instance.'
+
+  Key:
+    Type: String
+    Description: 'The key used to access the instance.'
+    Default: ''
+
+  VpcName:
+    Type: AWS::EC2::VPC::Id
+    Description: 'VPC Identifier, Provide any Management VPC V2 ID, default is Mgmt VPC V2 ID.'
+    Default: ''
+
+  Subnet:
+    Type: String
+    Default: ''
+    Description: 'Subnet in which FIG instance will be created. They are provided in runtime using custom resource defined in Resources'
+
+  SecurityGroup:
+    Type: String
+    Default: ''
+    Description: '[DO NOT Change] Default SG for the WL VPC will le loaded from SES.'
+
+  RootVolumeSize:
+    Type: Number
+    Default: 50
+    Description: 'Root volume size of the fig instance'
+
+  RootVolumeEncryption:
+    Type: String
+    Default: false
+    Description: 'Root volume encryption for Hardened Ami'
+
+  pSecretManager:
+    Type: String
+    Default: 'DXC-AWSMS-Offerings-SecretKeys'
+    Description: 'Secrets Manager secrets name containing the Falcon Client Id and Client Secret'
+
+  CommonSNSTopic:
+    Description: '[DO NOT CHANGE] ssm param of Common SNS Topic for service now alerts'
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/dxc/AWSMS/CommonSNSTopicForSnowAndEmail"
+
+  pSSMDocumentName:
+    Type: String
+    Default: 'FigServerVersionUpgradeSSMDocument'
+    Description: 'Name of the SSM Document.'
+
+  pFigServerName:
+    Default: 'SecurityHubIntegrationServer'
+    Description: Provide EC2 Instance Name where document needs to be executed.
+    Type: String   
+  
+  pFalconSSMFigSeverityThreshold:
+    Default: '3'
+    Description: Falcon Fig SeverityThreshold value as per configuration in crowdstrike github docs.
+    Type: String
+  
+  pFalconCloudRegion:
+    Default: 'us-2'
+    Description: Falcon cloud region. Expected falcon cloud region are - us-1, us-2, eu-1 and us-gov-1
+    Type: String
+  
+  pAWSRegion:
+    Default: 'us-west-2'
+    Description: Provide the AWS Region where you are working on
+    Type: String
+  
+  pCrowdStrikeCID:
+    Default: ''
+    Description: Provide CID value which can be retrieved from SSM Parameter
+    Type: String
+
+  pUpdateHash:
+    Type: String 
+    Description: This hash initiates updates to the rSSMDocumentFigExecLambdaFunction lambda in UPDATE event. This parameter MUST be changed to trigger an update.
+    Default: 0
+
+Conditions:
+
+  cSubnetNOTProvided: !Equals [!Ref Subnet, '']
+
+Resources:
+
+#save the cid and secret in parameter store
+#so that its used by installer
+  rGetAmiID:
+    Type: Custom::GetAmiID
+    Properties:
+      ServiceToken: !Join [ "", [ "arn:aws:lambda:",!Ref AWS::Region,":", !Ref AWS::AccountId, ":function:getSOEs" ] ]
+      OSName: amazon-linux2023
+      OSServiceLevel: GOLD
+      OSArchitecture: x86_64
+      RootVolumeEncrypted: !Ref RootVolumeEncryption
+
+  rFalconClientID:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "FIG_FALCON_CLIENT_ID"
+      Type: String
+      Value:
+        !Sub '{{resolve:secretsmanager:${pSecretManager}:SecretString:crowdstrike_client_id}}'
+      Description: "Falcon Client Id to be used in Crowdstrike Integration" 
+
+  rFalconClientSecret:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "FIG_FALCON_CLIENT_SECRET"
+      Type: String
+      Value:
+        !Sub '{{resolve:secretsmanager:${pSecretManager}:SecretString:crowdstrike_client_secret}}'
+      Description: "Falcon Client Secret to be used in Crowdstrike Integration"
+
+  rSSMAppId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: FIG_APP_ID
+      Type: String
+      Value: !Join ["-", ["Sec_Hub_Int", !Select [ 2, !Split [ '-', !Ref 'AWS::StackName' ]]]]
+      Description: CRWDSecHubIntegration App ID.
+
+  rSSMFigSeverityThreshold:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: FIG_SEVERITY_THRESHOLD
+      Type: String
+      Value: !Ref pFalconSSMFigSeverityThreshold
+
+  rInvokeGetPrivateSubnets:
+    Type: "Custom::InvokeGetPrivateSubnets"
+    Condition: cSubnetNOTProvided
+    Properties:
+      ServiceToken: !Join ["", ["arn:aws:lambda:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":function:getPrivateSubnets"]]
+      VPCID: !Ref VpcName
+
+  rFIGSecurityHubAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Fig SecurityHub Access Policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:DescribeInstances
+              - ec2:DescribeRegions
+              - securityhub:GetFindings
+            Resource: "*"
+          - Effect: Allow
+            Action: 
+              - securityhub:BatchImportFindings
+            Resource: "arn:aws:securityhub:*:*:product/crowdstrike/crowdstrike-falcon"           
+      Roles:
+        - !Ref rFIGInstanceIAMRole
+  
+  rS3BasicandSSMPermissionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Basic S3 Permission to list and copy objects and SSM Describe Instance.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:ListAllMyBuckets
+              - s3:ListBucket
+              - ssm:DescribeInstanceInformation
+            Resource: "*"          
+      Roles:
+        - !Ref rFIGInstanceIAMRole
+
+  rFIGInstanceIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ["-", ["CRWDSecHubInstRole", !Ref "AWS::Region"]]
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+            Condition: { }
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+
+  InstanceBootstrapInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref 'rFIGInstanceIAMRole'
+
+  rEC2FIGLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    DependsOn: rGetAmiID
+    Properties:
+      LaunchTemplateName: !Join ["-", ["dxc-awsms-EC2FIG-LaunchTemplate", !Ref "AWS::Region"]]
+      LaunchTemplateData:
+        ImageId: !GetAtt rGetAmiID.Image
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt
+            - InstanceBootstrapInstanceProfile
+            - Arn
+        KeyName: !Ref Key
+        BlockDeviceMappings:
+          - Ebs:
+              VolumeSize: !Ref RootVolumeSize
+              VolumeType: gp2
+              DeleteOnTermination: true
+            DeviceName: /dev/xvda
+        Monitoring: 
+          Enabled: true
+        NetworkInterfaces:
+          - DeviceIndex: '0'
+            AssociatePublicIpAddress: false
+            DeleteOnTermination: true
+            SubnetId: !If [cSubnetNOTProvided, !Select [ 0, !Split [ ',', !GetAtt rInvokeGetPrivateSubnets.SubnetIds ] ] , !Ref Subnet]
+            Groups:
+              - !Ref SecurityGroup  
+        UserData:
+          Fn::Base64: |
+            #! /bin/bash
+            # version 3.0
+            # Should consider also bootstrapping the CrowdStrike sensor at this point
+            # depending on current deployment patterns for the environment in question
+            echo "process started"
+            sudo yum -y update
+            while pgrep -f "yum|rpm"; do echo "Waiting for yum/rpm process to finish..."; sleep 10; done
+            echo "installing CW agent"
+            sudo yum -y install amazon-cloudwatch-agent
+            cat << EOF > /opt/aws/amazon-cloudwatch-agent/bin/config.json
+            {
+                    "agent": {
+                            "metrics_collection_interval": 60,
+                            "run_as_user": "root"
+                    },
+                    "metrics": {
+                            "append_dimensions": {
+                                    "AutoScalingGroupName": "\${!aws:AutoScalingGroupName}"
+                            },
+                            "metrics_collected": {
+                                    "mem": {
+                                            "measurement": [
+                                                    "mem_used_percent"
+                                            ],
+                                            "metrics_collection_interval": 60
+                                    }
+                            }
+                    }
+            }
+            EOF
+            /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json -s
+            echo "installation of CW agent is completed"
+
+            IMDS_TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+            INSTANCE_ID=`curl -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F '"' '/"instanceId"/ {print $4}' `
+            ACCOUNT_ID=`curl -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F '"' '/"accountId"/ {print $4}' `
+            AWS_REGION=`curl -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F '"' '/"region"/ {print $4}' `
+
+            BUCKET="dxc.customer.config-$ACCOUNT_ID-$AWS_REGION"
+            echo "InstanceId: $INSTANCE_ID"
+            echo "Bucket: $BUCKET"
+            
+            # Hack sudoers so requiretty is removed - otherwise we can't do run commands from AWS:\n",
+            sed -i -e '/^Defaults.*requiretty/s/^/#/' /etc/sudoers
+
+            # Download and install Falcon
+            echo "Start of Falcon sensor download"
+            . /etc/os-release
+            VERSION_ID=$(cut -d'.' -f1 <<<$VERSION_ID)
+            echo "Version is $VERSION_ID"
+            FALCON=$(aws s3 ls $BUCKET/deploy/externs/linux/amazon-linux/$VERSION_ID/ --recursive  | sort | tail -n 1)
+            
+            if [[ -z "$FALCON" ]]; then
+                echo "No $FALCON file found in $BUCKET/deploy/externs/linux/amazon-linux/$VERSION_ID"
+            else
+                FALCON=$(echo "$FALCON" | awk '{print $NF}' | awk -F '/' '{print $NF}')
+                echo "Falcon value - $FALCON"
+                aws s3 cp s3://$BUCKET/deploy/externs/linux/amazon-linux/$VERSION_ID/$FALCON /tmp/$FALCON
+                if [[ $? -ne 0 ]]; then
+                  echo "Issue copying $FALCON file to host."
+                else
+                  echo "$FALCON file moved to instance."
+                  rpm -Uvh /tmp/$FALCON
+                fi
+            fi
+            echo "process completed"
+
+#-e is the exit code. 0 is success. -r is reason
+        TagSpecifications:
+        - ResourceType: 'instance'
+          Tags:
+          -
+            Key: Application
+            Value:  !Ref 'AWS::StackName'
+          - 
+            Key: Owner
+            Value: DXC
+          -
+            Key: Name
+            Value: SecurityHubIntegrationServer
+
+  rFigASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: rEC2FIGLaunchTemplate
+    Properties:
+      AutoScalingGroupName: !Join ["-", ["dxc-awsms-FIG-AutoScalingGroup", !Ref "AWS::Region"]]
+      LaunchTemplate:
+        LaunchTemplateId: !Ref rEC2FIGLaunchTemplate
+        Version: !GetAtt rEC2FIGLaunchTemplate.LatestVersionNumber
+      MaxSize: '1'
+      MinSize: '1'
+      DesiredCapacity: '1'
+      HealthCheckType: 'EC2'
+      VPCZoneIdentifier: 
+        - !If [cSubnetNOTProvided, !Select [ 0, !Split [ ',', !GetAtt rInvokeGetPrivateSubnets.SubnetIds ] ] , !Ref Subnet]
+      NotificationConfigurations:
+        - TopicARN: !Ref CommonSNSTopic
+          NotificationTypes:
+          - autoscaling:EC2_INSTANCE_LAUNCH
+          - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+          - autoscaling:EC2_INSTANCE_TERMINATE
+          - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+      Tags:
+        -
+          Key: Application
+          Value:  !Ref 'AWS::StackName'
+          PropagateAtLaunch: true
+        - 
+          Key: Owner
+          Value: DXC
+          PropagateAtLaunch: true
+        -
+          Key: Name
+          Value: SecurityHubIntegrationServer
+          PropagateAtLaunch: true
+
+  rFigCPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      EvaluationPeriods: '2'
+      Statistic: Average
+      Threshold: '90'
+      AlarmDescription: Notify the user if CPU > 90% for 2 minutes
+      Period: '60'
+      AlarmActions:
+        - !Ref CommonSNSTopic
+      Namespace: AWS/EC2
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value:
+            Ref: rFigASG
+      ComparisonOperator: GreaterThanThreshold
+      MetricName: CPUUtilization
+
+  rFigMemoryAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      EvaluationPeriods: '2'
+      Statistic: Average
+      Threshold: '90'
+      AlarmDescription: Notify the user if Memory > 90% for 2 minutes
+      Period: '60'
+      AlarmActions:
+        - !Ref CommonSNSTopic
+      Namespace: CWAgent
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value:
+            Ref: rFigASG
+      ComparisonOperator: GreaterThanThreshold
+      MetricName: mem_used_percent
+
+  rSSMDocumentFigLatestVersionDeploy:
+    Type: AWS::SSM::Document
+    DependsOn:
+      - rFalconClientID
+      - rFalconClientSecret
+      - rSSMAppId
+      - rSSMFigSeverityThreshold    
+    Properties:
+      DocumentType: Automation
+      Name: !Ref pSSMDocumentName
+      Content:
+        schemaVersion: '0.3'
+        description: Install and configure the Falcon Integration Gateway (FIG) on an EC2 instance as the ec2-user
+        parameters:
+          FalconClientID:
+            default: !GetAtt rFalconClientID.Value 
+            description: Falcon client Id
+            type: String
+          FalconClientSecret:
+            default: !GetAtt rFalconClientSecret.Value
+            description: Falcon client secret
+            type: String
+          FalconSSMFigSeverityThreshold:
+            default: !GetAtt rSSMFigSeverityThreshold.Value
+            description: Falcon Severity Threshold
+            type: String                       
+          FalconSSMAppId:
+            default: !GetAtt rSSMAppId.Value
+            description: Falcon SSM ApplicationId
+            type: String       
+          FalconCloudRegion:
+            default: !Ref pFalconCloudRegion
+            description: Falcon cloud region
+            type: String
+          AWSRegion:
+            default: !Ref pAWSRegion
+            description: Provide the AWS Region where you are working on
+            type: String
+          CrowdStrikeCID:
+            default: !Ref pCrowdStrikeCID
+            description: Provide the CrowdStrikeCID which can be retrieved from SSM Parameter.
+            type: String
+          ConfirmInstance:
+            default: "false"
+            description: Manage whether or not to confirm instance in AWS account supported region. Due to NoneType error, we are setting this false.
+            type: String             
+          Ec2InstanceNameTag:
+            default: !Ref pFigServerName
+            description: Provide EC2 Instance Name i.e Target where we need to run the automation document
+            type: String
+        mainSteps:
+          - name: VerifyNodeAvailability
+            action: aws:waitForAwsResourceProperty
+            timeoutSeconds: 300
+            nextStep: InstallDependencies
+            isEnd: false
+            inputs:
+              Service: ssm
+              Api: DescribeInstanceInformation
+              Filters:
+                - Key: tag:Name
+                  Values:
+                    - '{{Ec2InstanceNameTag}}'
+              PropertySelector: $.InstanceInformationList[0].PingStatus
+              DesiredValues:
+                - Online        
+
+          - name: InstallDependencies
+            action: aws:runCommand
+            nextStep: CloneRepository
+            onFailure: Abort
+            isEnd: false
+            inputs:
+              DocumentName: AWS-RunShellScript
+              Parameters:
+                commands:
+                  - |
+                    # Retry mechanism to handle RPM lock issue
+                    RETRY_COUNT=5
+                    SLEEP_INTERVAL=10
+                    for ((i=1; i<=RETRY_COUNT; i++)); do
+                      yum install -y python3 python3-pip python3-devel git && break || {
+                        echo "Attempt $i failed, retrying after $SLEEP_INTERVAL seconds..."
+                        sleep $SLEEP_INTERVAL
+                      }
+                    done
+                    echo "Dependencies installed"
+              Targets:
+                - Key: tag:Name
+                  Values:
+                    - '{{Ec2InstanceNameTag}}'
+
+          - name: CloneRepository
+            action: aws:runCommand
+            nextStep: ConfigureFIGApplication
+            onFailure: Abort 
+            isEnd: false
+            inputs:
+              DocumentName: AWS-RunShellScript
+              Parameters:
+                commands:
+                  - cd /home/ec2-user
+                  - echo "Current working directory is $(pwd)"
+                  - git clone https://github.com/CrowdStrike/falcon-integration-gateway.git
+                  - if [ -d '/home/ec2-user/falcon-integration-gateway/' ]; then
+                  - '  echo "FIG repository cloned successfully..."'
+                  - else
+                  - '  echo "Failed to clone the repository"'
+                  - '  exit 1'
+                  - fi   
+              Targets:
+                  - Key: tag:Name
+                    Values:
+                      - '{{Ec2InstanceNameTag}}'
+
+          - name: ConfigureFIGApplication
+            action: aws:runCommand
+            nextStep: RunFIGApplication
+            onFailure: Abort
+            isEnd: false   
+            inputs:
+              DocumentName: AWS-RunShellScript
+              Parameters:
+                commands:
+                  - cd /home/ec2-user/falcon-integration-gateway/
+                  - echo "Current working directory is $(pwd)"                
+                  - echo "Modifying the config/config.ini file"
+                  - sed -i '/#backends = AWS,AWS_SQS,AZURE,GCP,WORKSPACEONE,CHRONICLE,CLOUDTRAIL_LAKE,GENERIC/c\backends = AWS' config/config.ini
+                  - sed -i '/#severity_threshold = 3/c\severity_threshold = {{FalconSSMFigSeverityThreshold}}' config/config.ini
+                  - sed -i '/#cloud_region = us-1/c\cloud_region = {{FalconCloudRegion}}' config/config.ini
+                  - sed -i '/#client_id = ABCD/c\client_id = {{FalconClientID}}' config/config.ini
+                  - sed -i '/#client_secret = ABCD/c\client_secret = {{FalconClientSecret}}' config/config.ini
+                  - sed -i '/#application_id = my-acme-gcp-1/c\application_id = {{FalconSSMAppId}}' config/config.ini
+                  - sed -i '/#region = eu-west-1/c\region = {{AWSRegion}}' config/config.ini
+                  - sed -i '/#confirm_instance = true/c\confirm_instance = {{ConfirmInstance}}' config/config.ini
+                  - echo "FIG configuration on config file is completed"
+              Targets:
+                - Key: tag:Name
+                  Values:
+                    - '{{Ec2InstanceNameTag}}'
+
+          - name: RunFIGApplication
+            action: aws:runCommand
+            isEnd: true
+            onFailure: Abort
+            inputs:
+              DocumentName: AWS-RunShellScript
+              Parameters:
+                commands: 
+                  - sudo /opt/CrowdStrike/falconctl -s --cid={{CrowdStrikeCID}} -f
+                  - echo "CID is set and now starting the Falcon sensor"
+                  - sudo systemctl start falcon-sensor
+                  - sudo systemctl status falcon-sensor
+                  - cd /home/ec2-user/falcon-integration-gateway/
+                  - echo "Creating virtual environment..."
+                  - python3 -m venv venv
+                  - echo "Activating virtual environment..."
+                  - bash -c source /home/ec2-user/falcon-integration-gateway/venv/bin/activate
+                  - source venv/bin/activate
+                  - echo "Inside virtual environment..."
+                  - python3 -m pip install --upgrade pip
+                  - pip --version
+                  - echo "Installing Python dependencies..."
+                  - pip install -r requirements.txt
+                  - echo "Dependencies installed inside the virtual env..."
+                  - echo "Running the Falcon Integration Gateway inside the virtual env..."
+                  - nohup bash -c 'source /home/ec2-user/falcon-integration-gateway/venv/bin/activate && python3 -m fig' > /var/log/fig.log 2>&1 &
+                  - echo "Falcon Integration Gateway (FIG) started..."
+              Targets:
+                - Key: tag:Name
+                  Values:
+                    - '{{Ec2InstanceNameTag}}'
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackName'
+        - Key: Owner
+          Value: DXC
+        - Key: Purpose
+          Value: Install and configure FIG using SSM Document
+
+  rSSMDocumentFigLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaSSMExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:StartAutomationExecution
+                  - ssm:DescribeAutomationExecutions
+                  - ssm:SendCommand
+                  - ssm:ListCommands
+                  - ssm:ListCommandInvocations
+                  - ssm:DescribeInstanceInformation
+                  - tag:GetResources
+                Resource: '*'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  rSSMDocumentFigExecLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: fig_app_config_ssmdoc.lambda_handler
+      MemorySize: 128
+      Timeout: 360
+      Layers:
+        - !Ref pSESLayerArn      
+      Role: !GetAtt rSSMDocumentFigLambdaExecutionRole.Arn    
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/fig_app_config_ssmdoc.zip"
+      Environment:
+        Variables:
+          SSMAutomationDocumentName: !Ref pSSMDocumentName
+          FigServerName: !Ref pFigServerName   
+      Tags:
+        - Key: Application
+          Value: !Ref 'AWS::StackName'
+        - Key: Owner
+          Value: DXC
+        - Key: Purpose
+          Value: Install and configure FIG by triggering SSM Document
+
+  CustomInvokingSSMDocument:
+    Type: Custom::TriggerSSMDocumentAutomation
+    DependsOn: 
+      - rFigASG                            # Execute custom resource when ASG gets created
+      - rSSMDocumentFigLatestVersionDeploy # Execute custom resource when SSM Document gets created
+      - rSSMDocumentFigExecLambdaFunction  # Execute custom resource when Trigger SSM Document Lambda function gets created
+    Properties:
+      ServiceToken: !GetAtt rSSMDocumentFigExecLambdaFunction.Arn
+      pUpdateHash: !Ref pUpdateHash

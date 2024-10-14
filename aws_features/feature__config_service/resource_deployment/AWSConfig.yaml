@@ -1,0 +1,512 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Enable AWS Config Recorder, Create S3 Bucket to
+  save AWS Config configuration changes, and to deploy
+  Notification System for non-compliant resources"
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Location of DXC Managed Services Assets:"
+        Parameters:
+          - pDXCS3BucketName
+          - pDXCS3KeyPrefix
+
+      - Label:
+          default: "Retention Intervals:"
+        Parameters:
+          - pAWSConfigGlacierRetention
+          - pAWSConfigTransitionDays
+
+
+     
+          
+
+    ParameterLabels:
+      pDXCServiceTier:
+        default: "Service Tier:"
+      pAWSConfigTransitionDays:
+        default: "AWSConfig retention in S3 in days:"
+      pAWSConfigGlacierRetention:
+        default: "AWSConfig logs retention in Glacier in days:"
+      pDXCS3BucketName:
+        default: "S3 Bucket Name:"
+      pDXCS3KeyPrefix:
+        default: "Asset Path:"
+      
+
+  Stack:
+    Value: 0
+  VersionDate:
+    Value: 20180306
+  Identifier:
+    Value: AWS-Config
+
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+      
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/ConfigService/S3AssetBucket
+    Description: SSM Parameter for bucket location
+
+  pDXCServiceTier:
+    Default: Gold
+    Type: String
+    AllowedValues:
+      - Gold
+
+  pAWSConfigGlacierRetention:
+        Description: Number of days to retain AWS Config logs in Glacier (Minimum 90)
+        Type: "AWS::SSM::Parameter::Value<String>"
+        Default: "/DXC/AWSConfig/GlacierRetention"
+        
+  pAWSConfigTransitionDays:
+        Description: Number of days to retain AWS Config logs before archiving to Glacier
+        Type: "AWS::SSM::Parameter::Value<String>"
+        Default: "/DXC/AWSConfig/TransitionDays"
+  
+
+Mappings:
+  AWSInfoRegionMap:
+    ap-northeast-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    ap-northeast-2:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    ap-south-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    ap-southeast-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    ap-southeast-2:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    ca-central-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    eu-central-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    eu-west-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    eu-west-2:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    eu-west-3:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    sa-east-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    us-east-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    us-east-2:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    us-gov-west-1:
+      Partition: aws-us-gov
+      AWSURL: https://s3-us-gov-west-1.amazonaws.com
+    us-west-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    us-west-2:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    me-south-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    ap-northeast-3:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com
+    eu-north-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.
+    eu-south-1:
+      Partition: aws
+      AWSURL: https://s3.amazonaws.com      
+
+  StepFunctionSupportRegionMap:
+    us-east-2:
+      Status: "supported"
+    us-east-1:
+      Status: "supported"
+    us-west-1:
+      Status: "supported"
+    us-west-2:
+      Status: "supported"
+    ap-northeast-1:
+      Status: "supported"
+    ap-northeast-2:
+      Status: "supported"
+    ap-northeast-3:
+      Status: "supported"
+    ap-south-1:
+      Status: "supported"
+    ap-southeast-1:
+      Status: "supported"
+    ap-southeast-2:
+      Status: "supported"
+    ca-central-1:
+      Status: "supported"
+    cn-north-1:
+      Status: "supported"
+    cn-northwest-1:
+      Status: "supported"
+    eu-central-1:
+      Status: "supported"
+    eu-west-1:
+      Status: "supported"
+    eu-west-2:
+      Status: "supported"
+    eu-west-3:
+      Status: "supported"
+    sa-east-1:
+      Status: "supported"
+    us-gov-west-1:
+      Status: "supported"
+    me-south-1:
+      Status: "supported"
+    ap-northeast-3:
+      Status: "supported"
+    eu-north-1:
+      Status: "supported"
+    eu-south-1:
+      Status: "supported"      
+
+  GlacierMap:
+    us-east-1:
+      GlacierSupported: Supported
+    us-east-2:
+      GlacierSupported: Supported
+    us-west-1:
+      GlacierSupported: Supported
+    us-west-2:
+      GlacierSupported: Supported
+    ca-central-1:
+      GlacierSupported: Supported
+    ap-south-1:
+      GlacierSupported: Supported
+    ap-northeast-2:
+      GlacierSupported: Supported
+    ap-southeast-2:
+      GlacierSupported: Supported
+    ap-northeast-1:
+      GlacierSupported: Supported
+    eu-central-1:
+      GlacierSupported: Supported
+    eu-west-1:
+      GlacierSupported: Supported
+    eu-west-2:
+      GlacierSupported: Supported
+    eu-west-3:
+      GlacierSupported: Supported
+    ap-southeast-1:
+      GlacierSupported: Supported
+    sa-east-1:
+      GlacierSupported: Supported
+    us-gov-west-1:
+      GlacierSupported: Supported
+    me-south-1: 
+      GlacierSupported: Supported
+    ap-northeast-3:
+      GlacierSupported: Supported
+    eu-north-1:
+      GlacierSupported: Supported
+    eu-south-1:
+      GlacierSupported: Supported      
+
+Conditions:
+  SupportsGlacier: !Equals [ !FindInMap [ GlacierMap, !Ref "AWS::Region", GlacierSupported ], "Supported" ]
+  
+  StepFunction-Support:
+    Fn::Equals:
+      - Fn::FindInMap:
+          - "StepFunctionSupportRegionMap"
+          - !Ref "AWS::Region"
+          - "Status"
+      - "supported"
+  
+  
+Resources:
+  rAWSConfigBucketLogs:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: LogDeliveryWrite
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: ObjectWriter
+      BucketEncryption:
+          ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+
+  rAWSConfigBucketLogsbucketpolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref rAWSConfigBucketLogs
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AWSConfigBucketPermissionsCheck
+            Effect: Allow
+            Principal: 
+              Service: config.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource:
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucketLogs'
+          - 
+            Sid: AWSConfigBucketExistenceCheck
+            Effect: Allow
+            Principal: 
+              Service: config.amazonaws.com
+            Action: s3:ListBucket
+            Resource:
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucketLogs'  
+          - 
+            Sid: AWSConfigBucketDelivery
+            Effect: Allow
+            Principal: 
+              Service: config.amazonaws.com
+            Action: s3:PutObject
+            Resource:
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucketLogs'
+                  - '/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: 'bucket-owner-full-control'
+          - 
+            Sid: AllowSSLRequestsOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucketLogs'
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucketLogs'
+                  - '/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+                   
+  rAWSConfigBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+            AccessControl: Private
+            BucketEncryption:
+               ServerSideEncryptionConfiguration:
+               - ServerSideEncryptionByDefault:
+                   SSEAlgorithm: AES256
+            VersioningConfiguration:
+                Status: Enabled
+            LoggingConfiguration:
+                DestinationBucketName: !Ref rAWSConfigBucketLogs
+                LogFilePrefix: accesslogs-                                
+            LifecycleConfiguration:
+                Rules:
+                  - Id: Transition90daysRetain7yrs
+                    Status: Enabled
+                    ExpirationInDays: !Ref pAWSConfigGlacierRetention
+                    Transition:
+                        TransitionInDays: !Ref pAWSConfigTransitionDays
+                        StorageClass: !If [ SupportsGlacier, GLACIER, STANDARD_IA ]
+            VersioningConfiguration:
+                Status: Enabled
+            PublicAccessBlockConfiguration:
+              BlockPublicAcls: True
+              BlockPublicPolicy: True
+              IgnorePublicAcls: True
+              RestrictPublicBuckets: True
+
+            Tags:
+              - Key: Owner
+                Value: DXC
+
+  rAWSConfigBucketbucketpolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref rAWSConfigBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AWSConfigBucketPermissionsCheck
+            Effect: Allow
+            Principal: 
+              Service: config.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource:
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucket'
+          - 
+            Sid: AWSConfigBucketExistenceCheck
+            Effect: Allow
+            Principal: 
+              Service: config.amazonaws.com
+            Action: s3:ListBucket
+            Resource:
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucket'  
+          - 
+            Sid: AWSConfigBucketDelivery
+            Effect: Allow
+            Principal: 
+              Service: config.amazonaws.com
+            Action: s3:PutObject
+            Resource:
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucket'
+                  - '/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: 'bucket-owner-full-control'
+          - 
+            Sid: AllowSSLRequestsOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucket'
+              - !Join
+                - ''
+                - - "arn:aws:s3:::"
+                  - !Ref 'rAWSConfigBucket'
+                  - '/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+                   
+  rSaveAWSConfigBucket:
+        Type: "AWS::SSM::Parameter"
+        Properties:
+            Name: /DXC/AWSConfigBucket
+            Description: Config Bucket
+            Type: "String"
+            Value: !Ref rAWSConfigBucket
+
+  rSaveAWSConfigBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "/DXC/ConfigService/AWSConfigBucket"
+      Description: AWS Config Bucket
+      Type: "String"
+      Value: !Ref rAWSConfigBucket
+
+  rAWSConfigRole:
+    Type: AWS::IAM::Role
+    DependsOn: rAWSConfigBucket
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - 'config.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWS_ConfigRole'
+      Policies:
+        -
+          PolicyName: !Join
+            - '-'
+            - - 'AWS_ConfigRole'
+              - !Ref 'AWS::Region'
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                Resource:
+                  - !Join
+                    - ''
+                    - - "arn:aws:s3:::"
+                      - !Ref 'rAWSConfigBucket'
+                      - '/*'
+                Condition:
+                  StringEquals:
+                    s3:x-amz-acl: 'bucket-owner-full-control'
+              -
+                Effect: "Allow"
+                Action:
+                  - 's3:GetBucketAcl'
+                Resource:
+                  - !Join
+                    - ''
+                    - - "arn:aws:s3:::"
+                      - !Ref 'rAWSConfigBucket'
+
+  rAWSConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    DependsOn: rAWSConfigRole
+    Properties:
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: true
+      RoleARN: !GetAtt rAWSConfigRole.Arn
+
+  rAWSConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    DependsOn: rAWSConfigRole
+    Properties:
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: "Six_Hours"
+      S3BucketName: !Ref rAWSConfigBucket
+
+ 
+
+Outputs:
+  AWSConfigBucket:
+    Value: !Ref rAWSConfigBucket
+    Export:
+      Name: "AWSConfigBucket"

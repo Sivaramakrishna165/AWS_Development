@@ -1,0 +1,436 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Creates JSON Document For Installing Unix SOE Hardening Scripts for Linux OS.",
+  "Parameters": {
+    "pDXCS3BucketName": {	
+      "Type": "AWS::SSM::Parameter::Value<String>", 	
+      "Default": "/DXC/SES/Module/DXCUnixSoeHardening/S3AssetBucket",	
+      "Description": "[DO NOT CHANGE] SSM Parameter for bucket location"	
+  },
+    "pDXCCoreCMBucket": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/DXC/CoreCM/Bucket",
+      "Description": "[DO NOT CHANGE] SSM Parameter for coreCM Bucket "
+    },
+    "pDXCCoreCMRegion": {
+      "Type": "String",
+      "Default": "us-east-1",
+      "Description": "[DO NOT CHANGE] awspe-downloads bucket region"
+    },
+    "pDXCCoreCMKey": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/DXC/CoreCM/Key",
+      "Description": "key inside the bucket"
+    },
+    "pDXCCoreCMARMKey": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/DXC/CoreCM-ARM/Key",
+      "Description": "key inside the bucket"
+    },
+    "pFeatureVersion": {
+      "Type": "String",
+      "Default": "None",
+      "Description": "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+    },
+    "pDXCS3KeyPrefix": {
+      "Type": "String",
+      "Default": "None",
+      "Description": "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+    }
+
+  },
+  "Resources": {
+    
+      "rFetchCoreCM": {
+         "Type": "AWS::Lambda::Function",
+         "DependsOn":["rFetchCoreCMLambdaExecutionRole"],
+         "Description": "Function to fetch current Core CM package name",
+         "Properties": {
+            "Code": {
+               "S3Bucket": { "Ref": "pDXCS3BucketName" },
+               "S3Key": { "Fn::Sub": "${pDXCS3KeyPrefix}/dxc_unix_soe_hardening.zip" }
+            },
+            "FunctionName": "FetchCoreCM",
+            "Handler": "fetch_corecm.handler",
+            "Role": {"Fn::GetAtt" : [ "rFetchCoreCMLambdaExecutionRole" , "Arn" ]},
+            "Runtime": "python3.11",
+            "Timeout": "600"
+         }
+      },
+   
+    "rFetchCoreCMLambdaExecutionRole":{
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess",
+          "arn:aws:iam::aws:policy/CloudWatchFullAccessV2"
+        ],
+        "Path": "/"
+      }
+    },
+    "rFetchCoreCMFedoraPackageVersion" : {
+      "Type": "Custom::FetchCoreCMPackageVersionFedoraFamily",
+      "DependsOn": "rFetchCoreCM",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::Join": ["", ["arn:aws:lambda:", {"Ref": "AWS::Region"},":",{"Ref": "AWS::AccountId"},":function:FetchCoreCM"]]
+        },
+        "CoreCMBucket":{ "Ref" : "pDXCCoreCMBucket" },
+        "Prefix":{ "Ref" : "pDXCCoreCMKey" },
+        "Type": "fedora",
+        "OSArch": "x86_64"
+      }
+    },
+    "rFetchCoreCMARMFedoraPackageVersion" : {
+      "Type": "Custom::FetchCoreCMPackageVersionFedoraFamily",
+      "DependsOn": "rFetchCoreCM",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::Join": ["", ["arn:aws:lambda:", {"Ref": "AWS::Region"},":",{"Ref": "AWS::AccountId"},":function:FetchCoreCM"]]
+        },
+        "CoreCMBucket":{ "Ref" : "pDXCCoreCMBucket" },
+        "Prefix":{ "Ref" : "pDXCCoreCMARMKey" },
+        "Type": "fedora",
+        "OSArch": "aarch64"
+      }
+    },
+    "rFetchCoreCMDebianPackageVersion" : {
+      "Type": "Custom::FetchCoreCMPackageVersionDebianFamily",
+      "DependsOn": "rFetchCoreCM",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::Join": ["", ["arn:aws:lambda:", {"Ref": "AWS::Region"},":",{"Ref": "AWS::AccountId"},":function:FetchCoreCM"]]
+        },
+        "CoreCMBucket":{ "Ref" : "pDXCCoreCMBucket" },
+        "Prefix":{ "Ref" : "pDXCCoreCMKey" },
+        "Type": "debian",
+        "OSArch": "x86_64"
+      }
+    },
+    "UnixSoeHardeningDocAssetPath": {
+      "Type": "AWS::SSM::Parameter",
+    "Properties": {
+      "Type": "String",
+      "Name": "/DXC/UnixSoeHardeningDoc/UnixSoeHardeningDocPath",
+      "Value": {
+         "Ref": "rUnixSoeHardeningDocument"
+          }
+         }
+        },
+    "rUnixSoeHardeningDocument": {
+      "Type": "AWS::SSM::Document",
+      "Properties": {
+        "DocumentType": "Command",
+        "Content": {
+          "schemaVersion": "2.2",
+          "description": "Installs DXC Unix SOE Hardening Scripts.",
+          "parameters": {},
+          "mainSteps": [
+            {
+              "name": "InstallUnixSOEHardening",
+              "action": "aws:runShellScript",
+              "inputs": {
+                "runCommand": [
+                  "#!/bin/bash -xe\n",
+                  "die(){",
+                  "  echo \"$@\" >&2",
+                  "  exit 1",
+                  "}\n",
+                  "check_error(){",
+                  "  if [[ ! $? -eq 0 ]]; then",
+                  "    die \"[ERROR] Failed while running: $@.\"",
+                  "  fi",
+                  "}\n",
+                  "install_software(){",
+                  "  cmd=\"sudo yum -y install python3\"",
+                  "  eval $cmd;",
+                  "  export OSARCH=$(uname -m)",
+                  "  echo \"OSARCH:$OSARCH\"",
+                  "if [ \"$OSARCH\" == \"aarch64\" ]; then",
+                  "  cmd=\"curl 'https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip' -o 'awscliv2.zip'\"",
+                  "elif [ \"$OSARCH\" == \"x86_64\" ]; then",
+                  "  cmd=\"curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o 'awscliv2.zip'\"",
+                  "else",
+                  "  die \"Could not identify OS architecture.\"",
+                  "fi\n",
+                  "  eval $cmd;",
+                  "if [ -f /etc/redhat-release ]; then",
+                  "  export VERSION_ID=$(cat /etc/os-release | grep VERSION_ID | cut -d'\"' -f 2)",
+                  "  echo \"VERSION_ID:$VERSION_ID\"",
+                  "  if [[ \"$VERSION_ID\" == 9* ]]; then \n",
+                  "  echo \"Do nothing. As CLI is already installed\"",
+                  "  else",
+                  "  cmd=\"unzip -o awscliv2.zip\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo ./aws/install --update\"",
+                  "  eval $cmd;",
+                  "  fi",
+                  "else",
+                  "  cmd=\"unzip -o awscliv2.zip\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo ./aws/install --update\"",
+                  "  eval $cmd;",
+                  "fi",
+                  "  cmd=\"export PATH=$PATH:/usr/local/bin\"",
+                  "  eval $cmd;",
+                  "}\n",
+                  "corecm_fedora_family(){",
+                  "  export OSARCH=$(uname -m)",
+                  "  echo \"OSARCH:$OSARCH\"",
+                  "if [ \"$OSARCH\" == \"aarch64\" ]; then",
+                  "  SOEDIR=\"/awspe/corecm/arm\"",
+                  "  EXTDIR=\"/awspe/corecm/arm/extract\"",
+                  "  mkdir -p $SOEDIR\n",
+                  "  mkdir -p $EXTDIR\n",
+                  "  sudo chmod 777 /awspe/corecm/arm",
+                  "  sudo chmod 777 /awspe/corecm/arm/extract",
+                  { "Fn::Join" : [ "", ["  SOEPKG=\"",{ "Fn::GetAtt" : [ "rFetchCoreCMARMFedoraPackageVersion", "CoreCMPackage" ] },"\""]]},
+                  "elif [ \"$OSARCH\" == \"x86_64\" ]; then",
+                  "  SOEDIR=\"/awspe/corecm/x86\"",
+                  "  EXTDIR=\"/awspe/corecm/x86/extract\"",
+                  "  mkdir -p $SOEDIR\n",
+                  "  mkdir -p $EXTDIR\n",
+                  "  sudo chmod 777 /awspe/corecm/x86",
+                  "  sudo chmod 777 /awspe/corecm/x86/extract",
+                  { "Fn::Join" : [ "", ["  SOEPKG=\"",{ "Fn::GetAtt" : [ "rFetchCoreCMFedoraPackageVersion", "CoreCMPackage" ] },"\""]]},
+                  "fi\n",
+                  
+                  "  if [ ! -f \"$SOEDIR/$SOEPKG\" ]; then",
+                  "if [ \"$OSARCH\" == \"aarch64\" ]; then",
+                  { "Fn::Join" : [ "", [ "    cmd=\"aws s3 cp s3://", { "Ref" : "pDXCCoreCMBucket" },"/",{ "Ref" : "pDXCCoreCMARMKey" },{ "Fn::GetAtt" : [ "rFetchCoreCMARMFedoraPackageVersion", "CoreCMPackage" ] }," $SOEDIR", " --region ", {"Ref": "pDXCCoreCMRegion"}, "\""] ] },
+                  "elif [ \"$OSARCH\" == \"x86_64\" ]; then",
+                  { "Fn::Join" : [ "", [ "    cmd=\"aws s3 cp s3://", { "Ref" : "pDXCCoreCMBucket" },"/",{ "Ref" : "pDXCCoreCMKey" },{ "Fn::GetAtt" : [ "rFetchCoreCMFedoraPackageVersion", "CoreCMPackage" ] }," $SOEDIR", " --region ", {"Ref": "pDXCCoreCMRegion"},"\""] ] },
+                  "fi\n",
+                  "    eval $cmd; check_error $cmd",
+                  "  fi\n",
+                  "  cd $SOEDIR",
+                  "  sudo tar xvf $SOEPKG -C $EXTDIR \n",
+                  "  echo \"CoRECM downloaded and extracted\"",
+                  "  echo \"CoRECM Installation Started\"",
+                  "if [ \"$OSARCH\" == \"aarch64\" ]; then",
+                  "  DIR=\"$EXTDIR\"\n",
+                  "  cmd=\"sudo yum -y install perl-Sys-Syslog\"",
+                  "  eval $cmd;",
+                  "  declare -a CoreCMfiles=(",
+                  "    \"$DIR/CORE_UI_Plugin-*-SIP.sh\"",
+                  "    \"$DIR/CoreCM-*-client-SIP.sh\");\n",
+                  "elif [ \"$OSARCH\" == \"x86_64\" ]; then",
+                  "  DIR=\"$EXTDIR\"\n",
+                  "  declare -a CoreCMfiles=(",
+                  "    \"$DIR/CORE_Perl_Plugin-*-SIP.sh\"",
+                  "    \"$DIR/CORE_UI_Plugin-*-SIP.sh\"",
+                  "    \"$DIR/CoreCM-*-client-SIP.sh\");\n",
+                  "fi\n",
+                  "  for x in ${CoreCMfiles[@]}; do",
+                  "  echo \"executing script:$x\"",
+                  "    cmd=\"sudo chmod +x $x \"",
+                  "    eval $cmd;",
+                  "    cmd=\"sudo sh $x -i\"",
+                  "    eval $cmd; check_error $cmd",
+                  "  done",
+                  "  echo \"CoRECM Installed\"",
+                  "  export perl_loc=$(which perl)",
+                  "  echo \"perl_loc:$perl_loc\"",
+                  "  cmd=\"sudo $perl_loc /opt/soe/local/harden/bin/harden.pl -p CISAWSPE -m auto\"\n",
+                  "  eval $cmd;",
+                  "  echo $?\n",
+                  "  cmd=\"sleep 10\"",
+                  "  cmd=\"sudo $perl_loc /opt/soe/local/harden/bin/harden.pl -p CISAWSPE -o Audit\"\n",
+                  "  eval $cmd;",
+                  "  echo $?\n",
+                  "}\n",
+                  "corecm_debian_family(){",
+                  "  sudo apt-get -y install auditd",
+                  "  SOEDIR=\"/awspe/corecm/x86\"",
+                  "  EXTDIR=\"/awspe/corecm/x86/extract\"",
+                  { "Fn::Join" : [ "", ["  SOEPKG=\"",{ "Fn::GetAtt" : [ "rFetchCoreCMDebianPackageVersion", "CoreCMPackage" ] },"\""]]},
+                  "  mkdir -p $SOEDIR\n",
+                  "  mkdir -p $EXTDIR\n",
+                  "  sudo chmod 777 /awspe/corecm/x86",
+                  "  sudo chmod 777 /awspe/corecm/x86/extract",
+                  "  if [ ! -f \"$SOEDIR/$SOEPKG\" ]; then",
+                  { "Fn::Join" : [ "", [ "    cmd=\"aws s3 cp s3://", { "Ref" : "pDXCCoreCMBucket" },"/",{ "Ref" : "pDXCCoreCMKey" },{ "Fn::GetAtt" : [ "rFetchCoreCMDebianPackageVersion", "CoreCMPackage" ] }," $SOEDIR", " --region ", {"Ref": "pDXCCoreCMRegion"},"\""] ] },
+                  "    eval $cmd;",
+                  "    echo $?",
+                  "  fi\n",
+                  "  cd $SOEDIR",
+                  "  sudo tar xvf $SOEPKG -C $EXTDIR --strip-components 1 \n",
+                  "  DIR=\"$EXTDIR\"\n",
+                  "  echo \"CoRECM downloaded and extracted\"",
+                  "  echo \"CoRECM Installation Started\"",
+                  "  declare -a CoreCMfiles=(",
+                  "    \"$DIR/CORE_Perl_Plugin-*-SIP.sh\"",
+                  "    \"$DIR/CORE_UI_Plugin-*-SIP.sh\"",
+                  "    \"$DIR/CoreCM-*-client-SIP.sh\");\n",
+                  "  for x in ${CoreCMfiles[@]}; do",
+                  "    cmd=\"sudo chmod +x $x \"",
+                  "    eval $cmd;",
+                  "    cmd=\"sudo sh $x -i\"",
+                  "    eval $cmd >> /awspe/corecm/harden.log",
+                  "    echo $?",
+                  "    echo \"Package Installed: $x\"",
+                  "    echo $?",
+                  "  done",
+                  "  echo $?",
+                  "  echo \"CoRECM Installed\"\n",
+                  "  echo $?\n",
+                  "  cmd=\"sudo /opt/soe/local/bin/perl /opt/soe/local/harden/bin/harden.pl -p CISAWSPE -m auto\"\n",
+                  "  #echo $cmd",
+                  "  eval $cmd",
+                  "  sleep 5",
+                  "  echo \"CoRECM auto is done\"\n",
+                  "  echo $?\n",
+                  "  cmd=\"sudo /opt/soe/local/bin/perl /opt/soe/local/harden/bin/harden.pl -p CISAWSPE -o Audit\"\n",
+                  "  eval $cmd",
+                  "  echo \n",
+                  "  echo \"CoRECM Audit is done\"\n",
+                  "  echo \"CoRECM Harden is done\"\n",
+                  "}\n",
+                  "if [ -f /etc/os-release ]; then",
+                  "  echo \"found /etc/os-release\"",
+                  "  cmd=\". /etc/os-release\"",
+                  "  eval $cmd;",
+                  "elif [ -f /etc/redhat-release ]; then",
+                  "  echo \"found /etc/redhat-release\"",
+                  "  cmd=\"yum install redhat-lsb-core -y\"",
+                  "  eval $cmd;",
+                  "  export ID=\"rhel\"",
+                  "if [ -f /usr/bin/lsb_release ]; then",
+                  "  export NAME=$(/usr/bin/lsb_release -d | cut -f 2)",
+                  "  export VERSION_ID=$(/usr/bin/lsb_release -r | cut -f 2)",
+                  "elif [ -f /etc/os-release ]; then",
+                  "  export VERSION_ID=$(cat /etc/os-release | grep VERSION_ID | cut -d'\"' -f 2)",
+                  "  export NAME=$(/etc/redhat-release)",
+                  "fi\n",
+                  "else",
+                  "  die \"Could not identify distribution.\"",
+                  "fi\n",
+                  "dist=$ID\n",
+                  "echo \"Detected ID: $dist\"",
+                  "echo \"Detected Name: $NAME\"",
+                  "if [ \"$dist\" == \"sled\" ] || [ \"$dist\" = \"sles\" ]; then",
+                  "  echo \"$dist\"",
+                  "  cmd=\"sudo zypper -n install sysstat && systemctl start sysstat.service\"",
+                  "elif [ \"$dist\" == \"rhel\" ]; then",
+                  "  echo \"Distribution :rhel\" ",
+                  "  echo \"$dist\"",
+                  
+                  "  install_software\n",
+                  "  echo \"Software update\"",
+                  "  eval $cmd;",
+                  "if [ -f /usr/bin/lsb_release ]; then",
+                  "  export VERSION_ID=$(/usr/bin/lsb_release -d | cut -f 2)",
+                  "elif [ -f /etc/os-release ]; then",
+                  "  export VERSION_ID=$(cat /etc/os-release | grep VERSION_ID | cut -d'\"' -f 2)",
+                  "fi\n",
+                  "  echo \"VERSION_ID:$VERSION_ID\"",
+                  
+                  "    cmd=\"sudo yum install libnsl.x86_64 -y\"",
+                  "    eval $cmd;",
+                  "    cmd=\"sleep 10\"",
+                  "    eval $cmd;",
+                  "  if [[ \"$VERSION_ID\" == 8* ]]; then \n",
+                  "    cmd=\"sudo yum install redhat-lsb-core -y\"",
+                  "    eval $cmd;",
+                  "    cmd=\"sleep 5\"",
+                  "    echo \"$VERSION_ID\"",
+                  "  fi",
+                  "elif [ \"$dist\" == \"amzn\" ]; then",
+                  "  export VERSION_ID=$(cat /etc/os-release | grep VERSION_ID | cut -d'\"' -f 2)",
+                  "  if [[ \"$VERSION_ID\" == 2023* ]]; then \n",
+                  "    export OSARCH=$(uname -m)",
+                  "    if [ \"$OSARCH\" == \"x86_64\" ]; then",
+                  "      cmd=\"sudo yum install libnsl.x86_64 -y\"",
+                  "      eval $cmd;",
+                  "      cmd=\"sudo yum install libxcrypt-compat -y\"",
+                  "      eval $cmd;",
+                  "    fi",
+                  "  fi",
+                  "  cmd=\"sudo yum -y install sysstat\"",
+                  "elif [ \"$dist\" == \"sles\" ]; then",
+                  "  cmd=\"zypper -n install sysstat && systemctl start sysstat.service\"",
+                  "elif [ \"$dist\" = \"ol\" ]; then",
+                  "  echo $dist",
+                  "  cmd=\"sudo yum install libnsl.x86_64 -y\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo yum install -y tar\"",
+                  "  eval $cmd;",
+                  "elif [ \"$dist\" = \"ubuntu\" ]; then",
+                  "  echo $dist",
+                  "elif [ -z \"$dist\" ]; then",
+                  "  die \"Could not identify distribution.\"",
+                  "else",
+                  "  die \"Distribution not supported.\"",
+                  "fi",
+                  "#eval $cmd; check_error $cmd\n",                                    
+                  "if [ \"$dist\" = \"rhel\" ] || [ \"$dist\" = \"amzn\" ] ; then",
+                  "  cmd=\"sudo yum -y install aide\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo yum -y install firewalld\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo systemctl start firewalld.service\"",
+                  "  eval $cmd;",
+                  "elif [ \"$dist\" = \"ol\" ]; then",
+                  "  cmd=\"sudo yum -y install aide\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo yum -y install firewalld\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo systemctl start firewalld.service\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo yum -y install audit\"",
+                  "  eval $cmd;",
+		              "  cmd=\"sudo systemctl start auditd\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo yum install cronie -y\"",
+                  "  eval $cmd;",
+                  "fi",
+                  "if [ \"$dist\" = \"rhel\" ] || [ \"$dist\" = \"amzn\" ]; then",
+                  "  cmd=\"sudo yum -y install perl\"",
+                  "  eval $cmd;",
+                  "elif [ \"$dist\" = \"ol\" ]; then",
+                  "  cmd=\"sudo yum -y install perl\"",
+                  "  eval $cmd;",
+                  "  cmd=\"sudo setenforce 0\"",
+                  "  eval $cmd;",
+                  "elif [ \"$dist\" = \"ubuntu\" ]; then",
+                  "  cmd=\"sudo apt-get -y install perl\"",
+                  "  eval $cmd;",
+                  "elif [ \"$dist\" = \"sled\" ] || [ \"$dist\" = \"sles\" ]; then",
+                  "  cmd=\"sudo zypper -n install perl\"",
+                  "  eval $cmd;",
+                  "fi",
+                  "if [ \"$dist\" = \"rhel\" ] || [ \"$dist\" = \"amzn\" ] || [ \"$dist\" = \"sles\" ] || [ \"$dist\" = \"ol\" ]; then",
+                  "  echo $dist",
+                  "  corecm_fedora_family",
+                  "elif [ \"$dist\" = \"ubuntu\" ]; then",
+                  "  echo \"function corecm ubuntu called \"",
+                  "  corecm_debian_family",
+                  "  echo \"function corecm ubuntu done \"",
+                  "  exit 0",
+                  "fi",
+                  "exit 0"
+                ],
+                "timeoutSeconds": 120
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+  
+}

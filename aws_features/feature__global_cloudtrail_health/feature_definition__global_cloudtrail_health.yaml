@@ -1,0 +1,42 @@
+---
+# Feature Definition (FD) for Global Cloudtrail Health 
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: GlobalCloudtrailHealth
+Version: '9.0.0.4'
+StandardCreationBatch: 3
+EnableFeature: true
+Standards:
+  - Gold
+FeatureParams:
+  pIncidentsPriority:
+    Description: '[DO NOT CHANGE] Priority of the Incidents in ServiceNow'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1','2','3','4','5']
+  pComSnowInputTopic:
+    Description: 'ssm parameter for servicenow sns topic' 
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/SES/Module/CommonServicenow/ComSnowStdInputArn"
+Owner: 
+  Name: DXC AWS Platform Engineering
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: On a daily basis, check for existance of logs-cloudtrail-global stack in us-east-1 and open ServiceNow incident if not present
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - global_cloudtrail_health.yaml
+DependsOnFeature:
+  - CommonSNSTopic

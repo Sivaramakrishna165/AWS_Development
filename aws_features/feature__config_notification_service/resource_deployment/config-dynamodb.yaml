@@ -1,0 +1,58 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Cloudformation template to deploy DynamoDB database
+  to store non-compliant resources.  The database contains the following:
+    - Non-compliant resource per config rule
+    - If SNS notification has been sent per non-compliant item
+
+Resources:
+  rConfigNotificationDynamoDBTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "ConfigRuleName"
+          AttributeType: "S"
+        - AttributeName: "ResourceId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "ConfigRuleName"
+          KeyType: "HASH"
+        - AttributeName: "ResourceId"
+          KeyType: "RANGE"
+      BillingMode: "PAY_PER_REQUEST"      
+      GlobalSecondaryIndexes:
+        - IndexName: "Notifications"
+          KeySchema:
+            - AttributeName: "ResourceId"
+              KeyType: "HASH"
+          Projection:
+            NonKeyAttributes:
+              - "ConfigRuleName"
+              - "Notification"
+              - "ResourceType"
+            ProjectionType: "INCLUDE"
+      Tags:
+        - Key: "Purpose"
+          Value: "DynamoDB Table for AWS Config Resources Notifications"
+        - Key: "Cloudformation Stack"
+          Value: !Ref "AWS::StackName"
+        - Key: "Cloudformation Stack ID"
+          Value: !Ref "AWS::StackId"
+        - Key: "Owner"
+          Value: "DXC"
+        - Key: "Application"
+          Value: "AWS Managed Services"
+  rDynamoDBTableName:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: "rConfigNotificationDynamoDBTable"
+    Properties:
+      Name: "/DXC/ConfigService/DynamoDBTableName"
+      Description: "DynamoDB Table Name for AWS Config Notification System"
+      Type: "String"
+      Value: !Ref "rConfigNotificationDynamoDBTable"
+
+Outputs:
+  DynamoDBTableName:
+    Description: "Name of the DynamoDB Table"
+    Value: !Ref "rConfigNotificationDynamoDBTable"

@@ -1,0 +1,20 @@
+---
+# Feature Definition (FD) for CW Anomaly Detection
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: CWStepfunctionAnomalyDetection
+Version: '10.0.0.1'
+StandardCreationBatch: 3
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: 'CW StepFunction Anomaly Detection Alarms' 
+AllowDisable: true
+ResourceDeployment:
+  - cw_stepfunction_anomaly_detection.yaml

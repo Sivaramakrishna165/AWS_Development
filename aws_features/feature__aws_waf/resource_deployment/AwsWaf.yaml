@@ -1,0 +1,615 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creating a WAF configurations
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/AwsWaf/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+  pSESLayerArn:
+    Description: "SSM parameter for Lambda Layer ARN"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/SES/SESLayerLambdaArn
+  WebACLName:
+    Type: String
+    Default: "DxcmsWafWebAcl"
+    Description: Provide a name to your WebACL. 
+  ALBArn:
+    Description: Please provide ALB Arn or Comma-separated list of ALB Arn's to be associated with WAF WebACL.
+    Type: String
+    Default: ''
+  CwNamePrefix:
+    Description: The prefix for use in Name tag values
+    Type: String
+    MinLength: '5'
+    MaxLength: '25'
+    Default: cwlogger
+  IncludeCommonRuleSet:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Contains common rules (Admin protection (block external access to exposed admin pages), Amazon IP reputation list (based on Amazon threat intelligence), Anonymous IP list (allow you to block requests from services that allow obfuscation of viewer identity.), Core rule set (protection against exploitation of a wide range of vulnerabilities), Known bad inputs (allow you to block request patterns that are known to be invalid and are associated with exploitation or discovery of vulnerabilities)).
+  IncludeAdminProtection:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Contains rules that allow you to block external access to exposed admin pages.
+  IncludeKnownBadInputs:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Contains rules that allow you to block request patterns that are known to be invalid and are associated with exploitation or discovery of vulnerabilities.  
+  IncludeAmazonIPReputationList:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: This group contains rules that are based on Amazon threat intelligence. 
+  IncludeAnonymousIPList:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: This group contains rules that allow you to block requests from services that allow obfuscation of viewer identity. This can include request originating from VPN, proxies, Tor nodes, and hosting providers.
+  IncludeLinuxOperatingSystem:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Contains rules that block request patterns associated with exploitation of vulnerabilities specific to Linux, including LFI attacks. This can help prevent attacks that expose file contents or execute code for which the attacker should not have had access.  
+  IncludePHPApplication:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Contains rules that block request patterns associated with exploiting vulnerabilities specific to the use of the PHP, including injection of unsafe PHP functions.  
+  IncludePOSIXOperatingSystem:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Contains rules that block request patterns associated with exploiting vulnerabilities specific to POSIX/POSIX-like OS, including LFI attacks.  
+  IncludeSQLDatabase:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Contains rules that allow you to block request patterns associated with exploitation of SQL databases, like SQL injection attacks. This can help prevent remote injection of unauthorized queries.  
+  IncludeWindowsOperatingSystem:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Contains rules that block request patterns associated with exploiting vulnerabilities specific to Windows, (e.g., PowerShell commands). This can help prevent exploits that allow attacker to run unauthorized commands or execute malicious code.  
+  IncludeWordpressApplication:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: The WordPress Applications group contains rules that block request patterns associated with the exploitation of vulnerabilities specific to WordPress sites.  
+  # IncludeAccountCreationFraudPrevention:
+  #   Type: String
+  #   Default: "false"
+  #   AllowedValues:
+  #     - "true"
+  #     - "false"
+  #   Description: Provides protection against the creation of fraudulent accounts on your site. Fraudulent accounts can be used for activities such as obtaining sign-up bonuses and impersonating legitimate users.  
+  # IncludeAccountTakeoverPrevention:
+  #   Type: String
+  #   Default: "false"
+  #   AllowedValues:
+  #     - "true"
+  #     - "false"
+  #   Description: Provides protection for your login page against stolen credentials, credential stuffing attacks, brute force login attempts, and other anomalous login activities. With account takeover prevention, you can prevent unauthorized access that may lead to fraudulent activities, or inform legitimate users to take a preventive action.  
+  
+  PriorityIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priority fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+
+  WAFBlockedRequestAlarm:
+    Description: 'Enable for creating WAF Blocked Requests Alarm. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities is deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  WAFBlockedRequestPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 60
+  WAFBlockedRequestStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Sum'
+  WAFBlockedRequestThreshold:
+    Description: 'The value to compare with the specified statistic.'
+    Type: Number
+    Default: 1
+  
+  WAFBlockedRequestEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 2
+  WAFBlockedRequestComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanOrEqualToThreshold'
+    AllowedValues: ['GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+  
+  S3BucketNameForWafRulesBackup:
+    Type: String
+    Default: ""
+    Description: Provide S3 Bucket Name for storing rules and configuration of WAF WebACL on daily basis. 
+
+Conditions:
+  UseCommonRuleSet: !Equals [!Ref IncludeCommonRuleSet, "true"]
+  UseAdminProtection: !Equals [!Ref IncludeAdminProtection, "true"]
+  UseKnownBadInputs: !Equals [!Ref IncludeKnownBadInputs, "true"]
+  UseIPReputationList: !Equals [!Ref IncludeAmazonIPReputationList, "true"]
+  UseAnonymousIPList: !Equals [!Ref IncludeAnonymousIPList, "true"]
+  UseLinuxOperatingSystem: !Equals [!Ref IncludeLinuxOperatingSystem, "true"]
+  UsePHPApplication: !Equals [!Ref IncludePHPApplication, "true"]
+  UsePOSIXOperatingSystem: !Equals [!Ref IncludePOSIXOperatingSystem, "true"]
+  UseSQLDatabase: !Equals [!Ref IncludeSQLDatabase, "true"]
+  UseWindowsOperatingSystem: !Equals [!Ref IncludeWindowsOperatingSystem, "true"]
+  UseWordpressApplication: !Equals [!Ref IncludeWordpressApplication, "true"]
+  # UseAccountCreationFraudPrevention: !Equals [!Ref IncludeAccountCreationFraudPrevention, "true"]
+  # UseAccountTakeoverPrevention: !Equals [!Ref IncludeAccountTakeoverPrevention, "true"]
+  CreateAlarmForWAFBlockedRequest: !Equals [!Ref "WAFBlockedRequestAlarm", "true"]
+
+Resources:
+  WafWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Ref WebACLName
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      Description: My WebACL with AWS Managed Rules
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: WebACLMetrics
+      Rules:
+        - !If
+            - UseCommonRuleSet
+            - Name: CommonRuleSetRule
+              Priority: 1
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesCommonRuleSet
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLCommonRuleSetRule
+            - !Ref "AWS::NoValue"
+
+        - !If
+            - UseAdminProtection
+            - Name: AdminProtectionRule
+              Priority: 2
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesAdminProtectionRuleSet
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLAdminProtectionRule
+            - !Ref "AWS::NoValue"
+
+        - !If
+            - UseKnownBadInputs
+            - Name: KnownBadInputs
+              Priority: 3
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesKnownBadInputsRuleSet               
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLKnownBadInputsRule
+            - !Ref "AWS::NoValue"
+        
+        - !If
+            - UseIPReputationList
+            - Name: IPReputationList
+              Priority: 4
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesAmazonIpReputationList               
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLIPReputationRule
+            - !Ref "AWS::NoValue"
+
+        - !If
+            - UseAnonymousIPList
+            - Name: AnonymousIPList
+              Priority: 5
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesAnonymousIpList               
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLAnonymousIPListRule
+            - !Ref "AWS::NoValue"     
+
+        - !If
+            - UseLinuxOperatingSystem
+            - Name: LinuxOperatingSystem
+              Priority: 6
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesLinuxRuleSet
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLLinuxOperatingSystemRule
+            - !Ref "AWS::NoValue"
+
+        - !If
+            - UsePHPApplication
+            - Name: PHPApplication
+              Priority: 7
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesPHPRuleSet
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLPHPApplicationRule
+            - !Ref "AWS::NoValue"  
+
+        - !If
+            - UsePOSIXOperatingSystem
+            - Name: POSIXOperatingSystem
+              Priority: 8
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesUnixRuleSet
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLPOSIXOperatingSystemRule
+            - !Ref "AWS::NoValue"
+
+        - !If
+            - UseSQLDatabase
+            - Name: SQLDatabase
+              Priority: 9
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesSQLiRuleSet
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLSQLDatabaseRule
+            - !Ref "AWS::NoValue"   
+         
+        - !If
+            - UseWindowsOperatingSystem
+            - Name: WindowsOperatingSystem
+              Priority: 10
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesWindowsRuleSet
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLWindowsOperatingSystemRule
+            - !Ref "AWS::NoValue"  
+
+        - !If
+            - UseWordpressApplication
+            - Name: WordpressApplication
+              Priority: 11
+              Statement:
+                ManagedRuleGroupStatement:
+                  VendorName: AWS
+                  Name: AWSManagedRulesWordPressRuleSet
+              OverrideAction:
+                None: {}
+              VisibilityConfig:
+                SampledRequestsEnabled: true
+                CloudWatchMetricsEnabled: true
+                MetricName: WebACLWordpressApplicationRule
+            - !Ref "AWS::NoValue"  
+
+        # - !If
+        #     - UseAccountCreationFraudPrevention
+        #     - Name: AccountCreationFraudPreventionRule
+        #       Priority: 12
+        #       Statement:
+        #         ManagedRuleGroupStatement:
+        #           VendorName: AWS
+        #           Name: AWSManagedRulesACFPRuleSet
+        #       OverrideAction:
+        #         None: {}
+        #       VisibilityConfig:
+        #         SampledRequestsEnabled: true
+        #         CloudWatchMetricsEnabled: true
+        #         MetricName: WebACLAccountCreationFraudPreventionRule
+        #     - !Ref "AWS::NoValue"
+        
+        # - !If
+        #     - UseAccountTakeoverPrevention
+        #     - Name: AccountTakeoverPreventionRule
+        #       Priority: 13
+        #       Statement:
+        #         ManagedRuleGroupStatement:
+        #           VendorName: AWS
+        #           Name: AWSManagedRulesATPRuleSet
+        #       OverrideAction:
+        #         None: {}
+        #       VisibilityConfig:
+        #         SampledRequestsEnabled: true
+        #         CloudWatchMetricsEnabled: true
+        #         MetricName: WebACLAccountTakeoverPreventionRule
+        #     - !Ref "AWS::NoValue"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+      - Key: Purpose
+        Value: AWS WAF Creation with AWS Managed Rules.  
+
+  CloudwatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub aws-waf-logs-${CwNamePrefix}-web-owasp
+      RetentionInDays: 180
+    DependsOn: WafWebACL
+  
+  WebAcllogging:
+    Type: AWS::WAFv2::LoggingConfiguration
+    DependsOn: CustomInvokingLambda
+    Properties:
+      ResourceArn:
+        Fn::GetAtt:
+        - WafWebACL
+        - Arn
+      LogDestinationConfigs:
+        - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:aws-waf-logs-${CwNamePrefix}-web-owasp
+      LoggingFilter:
+        DefaultBehavior: KEEP
+        Filters:
+        - Behavior: KEEP
+          Conditions:
+          - ActionCondition:
+              Action: BLOCK
+          Requirement: MEETS_ANY
+      RedactedFields:
+      - SingleHeader:
+          Name: password
+  
+  WAFLoadBalancerAssociationLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WAFv2WebACLAssociationPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - wafv2:GetWebACL
+                  - wafv2:AssociateWebACL
+                  - wafv2:List*
+                  - elasticloadbalancing:SetWebACL
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess                
+
+  WAFConfigLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: aws_waf_config.lambda_handler
+      MemorySize: 128
+      Timeout: 120
+      Layers:
+        - !Ref pSESLayerArn
+      Role: !GetAtt WAFLoadBalancerAssociationLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/aws_waf_config.zip"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+      - Key: Purpose
+        Value: AWS WAF association with ALB.
+
+  CustomInvokingLambda:
+    Type: Custom::InvokeWafConfigLambda
+    DependsOn: WafWebACL
+    Properties:
+      ServiceToken: !GetAtt
+        - WAFConfigLambda
+        - Arn
+      WafWebAclArn:  
+        Fn::GetAtt:
+        - WafWebACL
+        - Arn
+      LoadBalancerArns: !Ref ALBArn                
+
+  WAFBlockedRequestAlarms:
+    Type: 'AWS::CloudWatch::Alarm'
+    Condition: CreateAlarmForWAFBlockedRequest
+    Properties:
+      AlarmActions:
+      - !Ref "PriorityIncidentTopic"
+      AlarmDescription: 'Measures the number of blocked request that came through unknown location.'
+      ComparisonOperator: !Ref WAFBlockedRequestComparisonOperator
+      Dimensions:
+      - Name: WebACL
+        Value: !Ref WebACLName
+      - Name: Region
+        Value: !Sub "${AWS::Region}"
+      - Name: Rule
+        Value: ALL  
+      EvaluationPeriods: !Ref WAFBlockedRequestEvaluationPeriods
+      MetricName: BlockedRequests
+      Namespace: 'AWS/WAFV2'
+      Period: !Ref WAFBlockedRequestPeriod
+      Statistic: !Ref WAFBlockedRequestStatistic
+      Threshold: !Ref WAFBlockedRequestThreshold
+  
+  WAFDRLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WAFv2DisasterRecoveryPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - wafv2:GetWebACL
+                  - wafv2:AssociateWebACL
+                  - wafv2:UpdateWebACL
+                  - wafv2:List*
+                  - wafv2:CreateWebACL
+                  - elasticloadbalancing:SetWebACL
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - s3:CreateBucket
+                  - s3:PutObject
+                  - s3:PutLifecycleConfiguration
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  RecoveredWAFDR:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: aws_waf_dr.lambda_handler
+      MemorySize: 128
+      Timeout: 180
+      Layers:
+        - !Ref pSESLayerArn
+      Role: !GetAtt WAFDRLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/aws_waf_dr.zip"
+      Environment:
+        Variables:
+          WafWebAclArn:  
+            Fn::GetAtt:
+            - WafWebACL
+            - Arn
+          S3BucketNameForWafBackup: !Ref S3BucketNameForWafRulesBackup  
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+      - Key: Purpose
+        Value: AWS WAF Disaster Recovery  
+
+  PermissionForEventsToInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref RecoveredWAFDR
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - WAFDREventRule
+          - Arn
+
+  WAFDREventRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Event that triggers the Recovery WAF DR lambda"
+      ScheduleExpression: "cron(0 10 * * ? *)"
+      Targets:
+        - Arn: !GetAtt RecoveredWAFDR.Arn
+          Id: "WAFDRLambdaExecRule" 
+
+Outputs:
+  WebAclARN:
+    Description: ARN of WebACL
+    Value:
+      Fn::GetAtt:
+      - WafWebACL
+      - Arn
+  CloudwatchLogsGroupARN:
+    Description: ARN of CloudWatch Logs Group
+    Value:
+      Fn::GetAtt:
+      - CloudwatchLogsGroup
+      - Arn  

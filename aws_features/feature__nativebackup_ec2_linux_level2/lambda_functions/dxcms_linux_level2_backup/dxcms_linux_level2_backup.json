@@ -1,0 +1,365 @@
+{
+    "Comment": "state machine that take linux level 2 back-up",
+    "StartAt": "FreezeFS",
+    "States": {
+      "FreezeFS": {
+        "Type": "Task",
+        "Parameters": {
+          "DocumentName": "${Instance_fs_freeze_doc}",
+          "InstanceIds.$": "$.Instance_id"
+        },
+        "ResultSelector": {
+          "Command_id.$": "$.Command.CommandId"
+        },
+        "ResultPath": "$.Result_Freeze_Command",
+        "Resource": "arn:aws:states:::aws-sdk:ssm:sendCommand",
+        "Next": "prepare_initial_payload",
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "IntervalSeconds": 3,
+            "MaxAttempts": 10,
+            "BackoffRate": 1
+          }
+        ]
+      },
+      "prepare_initial_payload":{
+        "Type": "Pass",
+        "Parameters": {
+          "Error.$": "States.Format('0')",
+          "RandomValue.$": "States.MathRandom(1,250)"
+        },
+        "ResultPath": "$.Error_backup_job",
+        "Next": "Wait_Freeze_Command_Invocation"
+  
+      },
+      "Wait_Freeze_Command_Invocation": {
+        "Type": "Wait",
+        "Seconds": 15,
+        "Next": "FreezeGetCommandInvocation"
+      },
+      "FreezeGetCommandInvocation": {
+        "Type": "Task",
+        "Next": "CheckFreezeInvocationStatus",
+        "Parameters": {
+          "CommandId.$": "$.Result_Freeze_Command.Command_id",
+          "InstanceId.$": "$.Instance_id[0]"
+        },
+        "ResultSelector": {
+          "Status.$": "$.Status",
+          "Output.$": "$.StandardOutputContent",
+          "Command_id.$": "$.CommandId"
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "IntervalSeconds": 3,
+            "MaxAttempts": 10,
+            "BackoffRate": 2
+          }
+        ],
+        "ResultPath": "$.Result_Freeze_Invocation",
+        "Resource": "arn:aws:states:::aws-sdk:ssm:getCommandInvocation"
+      },
+      "CheckFreezeInvocationStatus": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Variable": "$.Result_Freeze_Invocation.Status",
+            "StringEquals": "Success",
+            "Next": "Wait"
+          },
+          {
+            "Or": [
+              {
+                "Variable": "$.Result_Freeze_Invocation.Status",
+                "StringEquals": "InProgress"
+              },
+              {
+                "Variable": "$.Result_Freeze_Invocation.Status",
+                "StringEquals": "Pending"
+              }
+            ],
+            "Next": "Wait_Freeze_Command_Invocation"
+          }
+        ],
+        "Default": "Prepare_failed_Payload"
+      },
+      "Prepare_failed_Payload": {
+        "Type": "Pass",
+        "Parameters": {
+          "Error.$": "States.Format('3')"
+        },
+        "ResultPath": "$.Error_backup_job",
+        "Next": "Split_freeze_command_output"
+      },
+      "SNS Publish": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::sns:publish",
+        "Parameters": {
+          "TopicArn": "${Topic_arn}",
+          "Message": {
+            "message": "Step Function execution failed for the following instance",
+            "Instance_id.$": "$.Instance_id[0]",
+            "Step_Function.$":"$$.StateMachine.Name",
+          "Execution_Id.$": "$$.Execution.Name"
+          }
+        },
+        "Next": "Fail"
+      },
+      "Wait": {
+        "Type": "Wait",
+        "SecondsPath": "$.Error_backup_job.RandomValue",
+        "Next": "StartBackupJob"
+      },
+      "StartBackupJob": {
+        "Type": "Task",
+        "Parameters": {
+          "BackupVaultName": "${Backup_vault_name}",
+          "IamRoleArn": "${Iam_role_backup_job}",
+          "ResourceArn.$": "States.Format('arn:aws:ec2:{}:{}:instance/{}',$.region,$.Account_id,$.Instance_id[0])",
+          "Lifecycle.$": "$.retention_period",
+          "RecoveryPointTags": {
+            "FSConsistent": "True",
+            "DeleteOn":"True"
+          }
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "IntervalSeconds": 3,
+            "MaxAttempts": 10,
+            "BackoffRate": 2
+          }
+        ],
+        "ResultSelector": {
+          "Backup_job_id.$": "$.BackupJobId"
+        },
+        "ResultPath": "$.Result_backup_job",
+        "Resource": "arn:aws:states:::aws-sdk:backup:startBackupJob",
+        "Next": "DescribeBackupJob",
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "ResultPath": "$.Error_backup_job",
+            "Next": "Split_freeze_command_output"
+          }
+        ]
+      },
+      "DescribeBackupJob": {
+        "Type": "Task",
+        "Parameters": {
+          "BackupJobId.$": "$.Result_backup_job.Backup_job_id"
+        },
+        "Resource": "arn:aws:states:::aws-sdk:backup:describeBackupJob",
+        "ResultSelector": {
+          "Backup_job_id.$": "$.BackupJobId",
+          "Backup_vault.$": "$.BackupVaultName",
+          "State.$": "$.State"
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "IntervalSeconds": 3,
+            "MaxAttempts": 10,
+            "BackoffRate": 2
+          }
+        ],
+        "ResultPath": "$.Result_describe_backup_job",
+        "Next": "check_backup_state"
+      },
+      "check_backup_state": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Or": [
+              {
+                "Variable": "$.Result_describe_backup_job.State",
+                "StringEquals": "CREATED"
+              },
+              {
+                "Variable": "$.Result_describe_backup_job.State",
+                "StringEquals": "RUNNING"
+              },
+              {
+                "Or": [
+                  {
+                    "Variable": "$.Result_describe_backup_job.State",
+                    "StringEquals": "PENDING"
+                  }
+                ]
+              }
+            ],
+            "Next": "Wait_backup_completion"
+          },
+          {
+            "Variable": "$.Result_describe_backup_job.State",
+            "StringEquals": "COMPLETED",
+            "Next": "Split_freeze_command_output"
+          }
+        ],
+        "Default": "Prepare_backup_failed_Payload"
+      },
+      "Prepare_backup_failed_Payload": {
+        "Type": "Pass",
+        "Parameters": {
+          "Error.$": "States.Format('1')"
+        },
+        "ResultPath": "$.Error_backup_job",
+        "Next": "Split_freeze_command_output"
+      },
+      "Fail": {
+        "Type": "Fail",
+        "Error": "Backup_Job_Failed"
+      },
+      "Wait_backup_completion": {
+        "Type": "Wait",
+        "Seconds": 10,
+        "Next": "DescribeBackupJob"
+      },
+      "Split_freeze_command_output": {
+        "Type": "Pass",
+        "Parameters": {
+          "out.$": "States.StringSplit($.Result_Freeze_Invocation.Output, '\n')"
+        },
+        "ResultPath": "$.Split_freeze_command_output",
+        "Next": "get_array_length"
+      },
+      "get_array_length": {
+        "Type": "Pass",
+        "Parameters": {
+          "length.$": "States.ArrayLength($.Split_freeze_command_output.out)"
+        },
+        "Next": "get_index",
+        "ResultPath": "$.get_array_length"
+      },
+      "get_index": {
+        "Type": "Pass",
+        "Next": "get_freeze_volume_value",
+        "Parameters": {
+          "item.$": "States.MathAdd($.get_array_length.length, -1)"
+        },
+        "ResultPath": "$.get_index"
+      },
+      "get_freeze_volume_value": {
+        "Type": "Pass",
+        "Next": "UnFreezeFS",
+        "Parameters": {
+          "item.$": "States.ArrayGetItem($.Split_freeze_command_output.out, $.get_index.item)"
+        },
+        "ResultPath": "$.get_freeze_volume_value"
+      },
+      "UnFreezeFS": {
+        "Type": "Task",
+        "Parameters": {
+          "DocumentName": "${Instance_fs_unfreeze_doc}",
+          "InstanceIds.$": "$.Instance_id",
+          "Parameters": {
+            "Freezedvolumes.$": "States.Array(States.Format('{}',$.get_freeze_volume_value.item))"
+          }
+        },
+        "ResultSelector": {
+          "Command_id.$": "$.Command.CommandId"
+        },
+        "ResultPath": "$.Result_UnFreeze_Command",
+        "Resource": "arn:aws:states:::aws-sdk:ssm:sendCommand",
+        "Next": "Wait_UnFreeze_Command_Invocation",
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "IntervalSeconds": 3,
+            "MaxAttempts": 10,
+            "BackoffRate": 1
+          }
+        ]
+      },
+      "Wait_UnFreeze_Command_Invocation": {
+        "Type": "Wait",
+        "Seconds": 15,
+        "Next": "UnFreezeGetCommandInvocation"
+      },
+      "UnFreezeGetCommandInvocation": {
+        "Type": "Task",
+        "Next": "CheckUnFreezeInvocationStatus",
+        "Parameters": {
+          "CommandId.$": "$.Result_UnFreeze_Command.Command_id",
+          "InstanceId.$": "$.Instance_id[0]"
+        },
+        "ResultSelector": {
+          "Status.$": "$.Status",
+          "Output.$": "$.StandardOutputContent",
+          "Command_id.$": "$.CommandId"
+        },
+        "Retry": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "IntervalSeconds": 3,
+            "MaxAttempts": 10,
+            "BackoffRate": 2
+          }
+        ],
+        "ResultPath": "$.Result_UnFreeze_Invocation",
+        "Resource": "arn:aws:states:::aws-sdk:ssm:getCommandInvocation"
+      },
+      "CheckUnFreezeInvocationStatus": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Not": {
+              "Variable": "$.Result_UnFreeze_Invocation.Status",
+              "StringEquals": "Success"
+            },
+            "Next": "SNS Publish"
+          },
+          {
+            "Or": [
+              {
+                "Variable": "$.Result_UnFreeze_Invocation.Status",
+                "StringEquals": "InProgress"
+              },
+              {
+                "Variable": "$.Result_UnFreeze_Invocation.Status",
+                "StringEquals": "Pending"
+              }
+            ],
+            "Next": "Wait_UnFreeze_Command_Invocation"
+          }
+        ],
+        "Default": "check_Failed_Backup"
+      },
+      "check_Failed_Backup": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Variable": "$.Error_backup_job.Error",
+            "StringEquals": "0",
+            "Next": "Backup_Completed"
+          },
+          {
+            "Variable": "$.Error_backup_job.Error",
+            "StringEquals": "1",
+            "Next": "Fail"
+          }
+        ],
+        "Default": "SNS Publish"
+      },
+      "Backup_Completed": {
+        "Type": "Pass",
+        "End": true
+      }
+    }
+  }

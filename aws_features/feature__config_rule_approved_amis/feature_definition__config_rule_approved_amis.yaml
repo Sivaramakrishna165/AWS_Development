@@ -1,0 +1,43 @@
+---
+# Feature Definition (FD) for the ConfigRuleApprovedAmis
+# This is a feature that creates Config rule to prohibit S3 public read
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: ConfigRuleApprovedAmis
+Version: '10.0.0.4'
+StandardCreationBatch: 2
+EnableFeature: true
+FeatureParams:
+  pApprovedAMIsTags:
+    Description: "List of tag-key:tag-value which are used to evaluate whether or not an AMI is compliant"
+    Type: CommaDelimitedList
+    Default: "Environment:Production,Environment:Staging,Environment:QA"
+  pFtApprAmiAmiListToSkip:
+    Type: String
+    Default: "Blank"
+    Description: "List of Amis to be skipped from config compliance check. For multiple Amis to be skipped evaluating against the config rule, use comma separated values."
+
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Aws Config rule to verify whether instances were launched with approved amis
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - ApprovedAmis.yaml
+DependsOnFeature:
+  - ConfigService

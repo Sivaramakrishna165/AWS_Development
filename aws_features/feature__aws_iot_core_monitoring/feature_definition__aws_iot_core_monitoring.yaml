@@ -1,0 +1,67 @@
+---
+# Feature Definition (FD) for AWSIotCoreMonitoring
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AWSIotCoreMonitoring
+Version: '9.0.0.2'
+StandardCreationBatch: 3
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creating the cloudwatch alarms for Iot Core service.
+FeatureParams:
+  pCommonIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priroity fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+Alarms:
+  Connect.Success_Alarm:
+    ComparisonOperator: LessThanThreshold
+    Dimensions:
+    - Name: Protocol
+      Value: <TO BE FILLED>
+    EvaluationPeriods: 1
+    MetricName: Connect.Success
+    Namespace: AWS/IoT
+    Period: 3600
+    Statistic: Sum
+    Threshold: 2
+
+  PublishIn.Success_Alarm:
+    ComparisonOperator: LessThanThreshold
+    Dimensions:
+    - Name: Protocol
+      Value: <TO BE FILLED>
+    EvaluationPeriods: 1
+    MetricName: PublishIn.Success
+    Namespace: AWS/IoT
+    Period: 3600
+    Statistic: Sum
+    Threshold: 2
+  
+  FailedJobExecutionTotalCount_Alarm:
+    ComparisonOperator: GreaterThanThreshold
+    Dimensions:
+    - Name: JobId
+      Value: <TO BE FILLED>
+    EvaluationPeriods: 1
+    MetricName: FailedJobExecutionTotalCount
+    Namespace: AWS/IoT
+    Period: 3600
+    Statistic: Sum
+    Threshold: 20
+
+ResourceDeployment:
+  - aws_iot_core_monitoring.yaml
+DepensOnFeature:
+  - AWSCloudWatchAlarmsIncidentPriorities

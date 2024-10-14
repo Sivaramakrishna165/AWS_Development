@@ -1,0 +1,108 @@
+---
+# Feature Definition (FD) for NativebackupS3
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: NativebackupS3
+Version: '9.0.0.2'
+StandardCreationBatch: 3
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: AWS Tag based Native backup solution for S3
+
+FeatureParams:
+
+  pfCreateNewKMSKey:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: "Create new KMS key for AWS S3 Backup. If true, specify KeyName parameter, otherwise specify ExistingKeyArn."
+
+  pfKeyName:
+    Type: String
+    Default: 's3-backup-kms'
+    Description: "AWS KMS Key name. Required if CreateNewKMSKey param is true."
+
+  pfAliasName:
+    Type: String
+    Default: 'alias/dxc/s3'
+    Description: "AWS KMS Alias Name. Required if CreateNewKMSKey param is true."     
+
+  pfExistingKeyArn:
+    Type: String
+    Default: "dummy"
+    Description: "KMS Key Arn. Required if CreateNewKMSKey param is false."
+
+  pfCreateNewBackupVault:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+    Description: "Create new Backup Vault for S3 Backup."
+
+  pfBackupVaultName:
+    Type: String
+    Description: "Enter the Backup Vault Name to be created for S3"
+    Default: 'S3BackUpVault'
+
+  pfBackupPlanName:
+    Type: String
+    Default: "S3-BackUp-Plan"
+    Description: "AWS S3 Backup plan name."
+
+  pfBackupRuleName:
+    Type: String
+    Default: "S3-RuleName"
+    Description: "AWS S3 Backup rule name."
+
+  pfS3BackupScheduleExpression:
+    Type: String
+    Default: "cron(15 12 * * ? *)"
+    Description: "AWS Backup cron expression."
+
+  pfBackupDeleteAfterDays:
+    Type: Number
+    Default: 30
+    Description: "Days to expire backups from vault."
+
+  pfBackupSelectionName:
+    Type: String
+    Default: "S3-SelectionName"
+    Description: "AWS Backup selection name."
+
+  pfBackupConditionTagKey:
+    Type: String
+    Default: "aws:ResourceTag/backup"
+    Description: "Tag:Key associated with the resources to back up."
+
+  pfBackupConditionTagValue:
+    Type: String
+    Default: "true"
+    Description: "Tag:Value associated with the resources to back up."
+
+  pfVaultMinRetentionDays:
+    Type: String
+    Default: 30
+    Description: "Retention period in days that the vault retains backup data."
+
+  pfSnowInciPriority:
+    Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor, 4-warning, 5-ok (can be updated if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3', '4', '5']
+    
+AllowDisable: true
+ResourceDeployment:
+  - NativebackupS3.yaml
+DependsOnFeature:
+  - NativebackupMonitoring
+

@@ -1,0 +1,1333 @@
+[
+  {
+    "Service": "EC2",
+    "Metric": "CPUUtilization",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 90
+  },
+  {
+    "Service": "EC2",
+    "Metric": "CPUUtilization",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },
+  {
+    "Service": "EC2",
+    "Metric": "CPUUtilization",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 70
+  },
+  {
+    "Service": "EC2",
+    "Metric": "StatusCheckFailed",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 0
+  },
+  {
+    "Service": "EC2",
+    "Metric": "StatusCheckFailed",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 1
+  },
+  {
+    "Service": "EC2",
+    "Metric": "StatusCheckFailed",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 2
+  },
+  {
+    "Service": "EC2",
+    "Metric": "StatusCheckFailed_System",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 0
+  },
+  {
+    "Service": "EC2",
+    "Metric": "StatusCheckFailed_System",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 1
+  },
+  {
+    "Service": "EC2",
+    "Metric": "StatusCheckFailed_System",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 2
+  },
+  {
+    "Service": "EC2",
+    "Metric": "StatusCheckFailed_Instance",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 0
+  },
+  {
+    "Service": "EC2",
+    "Metric": "StatusCheckFailed_Instance",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 1
+  },
+  {
+    "Service": "EC2",
+    "Metric": "StatusCheckFailed_Instance",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 2
+  },
+  {
+    "Service": "EC2",
+    "Metric": "Memory % Committed Bytes In Use",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 90
+  },
+  {
+    "Service": "EC2",
+    "Metric": "Memory % Committed Bytes In Use",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },
+  {
+    "Service": "EC2",
+    "Metric": "Memory % Committed Bytes In Use",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 60
+  },
+  {
+    "Service": "EC2",
+    "Metric": "LogicalDisk % Free Space",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 15
+  },
+  {
+    "Service": "EC2",
+    "Metric": "LogicalDisk % Free Space",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 25
+  },
+  {
+    "Service": "EC2",
+    "Metric": "LogicalDisk % Free Space",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 30
+  },
+  {
+    "Service": "EC2",
+    "Metric": "DiskSpaceUtilization",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 90
+  },
+  {
+    "Service": "EC2",
+    "Metric": "DiskSpaceUtilization",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },
+  {
+    "Service": "EC2",
+    "Metric": "DiskSpaceUtilization",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 70
+  },
+  {
+    "Service": "EC2",
+    "Metric": "MemoryUtilization",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 90
+  },
+  {
+    "Service": "EC2",
+    "Metric": "MemoryUtilization",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },
+  {
+    "Service": "EC2",
+    "Metric": "MemoryUtilization",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 70
+  },
+  {
+    "Service": "RDS",
+    "Metric": "CPUUtilization",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 90
+  },
+  {
+    "Service": "RDS",
+    "Metric": "CPUUtilization",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },
+  {
+    "Service": "RDS",
+    "Metric": "CPUUtilization",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 70
+  },
+  {
+    "Service": "RDS",
+    "Metric": "FreeableMemory",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 78
+  },
+  {
+    "Service": "RDS",
+    "Metric": "FreeableMemory",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 153.6
+  },
+  {
+    "Service": "RDS",
+    "Metric": "FreeableMemory",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 256
+  },
+  {
+    "Service": "RDS",
+    "Metric": "FreeStorageSpace",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 0.65
+  },
+  {
+    "Service": "RDS",
+    "Metric": "FreeStorageSpace",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 0.75
+  },
+  {
+    "Service": "RDS",
+    "Metric": "FreeStorageSpace",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 0.85
+  },
+  {
+    "Service": "RDS",
+    "Metric": "BurstBalance",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 15
+  },
+  {
+    "Service": "RDS",
+    "Metric": "BurstBalance",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 25
+  },
+  {
+    "Service": "RDS",
+    "Metric": "BurstBalance",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 30
+  },
+  {
+    "Service": "RDS",
+    "Metric": "DiskQueueDepth",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },
+  {
+    "Service": "RDS",
+    "Metric": "DiskQueueDepth",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 70
+  },
+  {
+    "Service": "RDS",
+    "Metric": "DiskQueueDepth",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 60
+  },
+  {
+    "Service": "RDS",
+    "Metric": "ReadLatency",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 0.1
+  },
+  {
+    "Service": "RDS",
+    "Metric": "ReadLatency",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 0.05
+  },
+  {
+    "Service": "RDS",
+    "Metric": "ReadLatency",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 0.025
+  },
+  {
+    "Service": "RDS",
+    "Metric": "WriteLatency",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 0.1
+  },
+  {
+    "Service": "RDS",
+    "Metric": "WriteLatency",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 0.05
+  },
+  {
+    "Service": "RDS",
+    "Metric": "WriteLatency",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 0.025
+  },
+  {
+    "Service": "RDS",
+    "Metric": "SwapUsage",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 256000000
+  },
+  {
+    "Service": "RDS",
+    "Metric": "SwapUsage",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 516000000
+  },
+  {
+    "Service": "RDS",
+    "Metric": "SwapUsage",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 1024000000
+  },
+  {
+    "Service": "CloudFront",
+    "Metric": "4xxErrorRate",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 15
+  },
+  {
+    "Service": "CloudFront",
+    "Metric": "4xxErrorRate",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+  {
+    "Service": "CloudFront",
+    "Metric": "4xxErrorRate",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 5
+  },
+{
+    "Service": "CloudFront",
+    "Metric": "5xxErrorRate",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 15
+  },
+  {
+    "Service": "CloudFront",
+    "Metric": "5xxErrorRate",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+  {
+    "Service": "CloudFront",
+    "Metric": "5xxErrorRate",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 5
+  },
+  {
+    "Service": "AmplifyHosting",
+    "Metric": "4xxErrors",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 15
+  },
+  {
+    "Service": "AmplifyHosting",
+    "Metric": "4xxErrors",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+  {
+    "Service": "AmplifyHosting",
+    "Metric": "4xxErrors",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 5
+  },
+{
+    "Service": "AmplifyHosting",
+    "Metric": "5xxErrors",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 15
+  },
+  {
+    "Service": "AmplifyHosting",
+    "Metric": "5xxErrors",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+  {
+    "Service": "AmplifyHosting",
+    "Metric": "5xxErrors",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 5
+  },
+  {
+    "Service": "Athena",
+    "Metric": "TotalExecutionTime",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 30000
+  },
+{
+    "Service": "Athena",
+    "Metric": "TotalExecutionTime",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 20000
+  },
+{
+    "Service": "Athena",
+    "Metric": "TotalExecutionTime",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 10000
+  },
+{
+    "Service": "Athena",
+    "Metric": "ProcessedBytes",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+{
+    "Service": "Athena",
+    "Metric": "ProcessedBytes",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 5
+  },
+{
+    "Service": "Athena",
+    "Metric": "ProcessedBytes",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 3
+  },
+  {
+    "Service": "Cognito",
+    "Metric": "FederationThrottles",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+  {
+    "Service": "Cognito",
+    "Metric": "FederationThrottles",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 25
+  },
+  {
+    "Service": "Cognito",
+    "Metric": "FederationThrottles",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 50
+  },
+  {
+    "Service": "Cognito",
+    "Metric": "SignInThrottles",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+  {
+    "Service": "Cognito",
+    "Metric": "SignInThrottles",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 25
+  },
+  {
+    "Service": "Cognito",
+    "Metric": "SignInThrottles",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 50
+  },
+{
+    "Service": "Cognito",
+    "Metric": "SignUpThrottles",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+  {
+    "Service": "Cognito",
+    "Metric": "SignUpThrottles",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 25
+  },
+  {
+    "Service": "Cognito",
+    "Metric": "SignUpThrottles",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 50
+  },
+  {
+    "Service": "Glue",
+    "Metric": "glue.driver.aggregate.numFailedTasks",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 5
+  },
+  {
+    "Service": "Glue",
+    "Metric": "glue.driver.aggregate.numFailedTasks",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 3
+  },
+  {
+    "Service": "Glue",
+    "Metric": "glue.driver.aggregate.numFailedTasks",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 2
+  },
+  {
+    "Service": "QuickSight",
+    "Metric": "VisualLoadTime",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 30000
+  },
+  {
+    "Service": "QuickSight",
+    "Metric": "VisualLoadErrorCount",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+  {
+    "Service": "QuickSight",
+    "Metric": "VisualLoadErrorCount",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 5
+  },
+  {
+    "Service": "QuickSight",
+    "Metric": "VisualLoadErrorCount",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 2
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "MemoryUtilization",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 90
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "MemoryUtilization",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "MemoryUtilization",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 70
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "CPUUtilization",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 90
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "CPUUtilization",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "CPUUtilization",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 70
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "OutboundNetworkThroughput",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 10000
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "OutboundNetworkThroughput",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 9000 
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "OutboundNetworkThroughput",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 8000 
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "InboundNetworkThroughput",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 10000 
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "InboundNetworkThroughput",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 9000 
+  },
+  {
+    "Service": "AWS/M2",
+    "Metric": "InboundNetworkThroughput",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 8000 
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "Invocations",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 200
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "Invocations",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 150
+  },	
+  {
+    "Service": "Lambda",
+    "Metric": "Invocations",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 100
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "Duration",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 1200000
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "Duration",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 900000
+  },	
+  {
+    "Service": "Lambda",
+    "Metric": "Duration",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 720000
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "Errors",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },	
+  {
+    "Service": "Lambda",
+    "Metric": "Errors",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 5
+  },
+  { 
+    "Service": "Lambda",
+    "Metric": "Errors",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 3
+  },	
+  {
+    "Service": "Lambda",
+    "Metric": "Throttles",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 10
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "Throttles",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 5
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "Throttles",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 3
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "ConcurrentExecutions",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },	
+  {
+    "Service": "Lambda",
+    "Metric": "ConcurrentExecutions",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 50
+  },	
+  {
+    "Service": "Lambda",
+    "Metric": "ConcurrentExecutions",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 30
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "UnreservedConcurrentExecutions",
+    "Priority": "P1",
+    "AlarmType": "Static",
+    "Threshold": 80
+  },
+  {
+    "Service": "Lambda",
+    "Metric": "UnreservedConcurrentExecutions",
+    "Priority": "P2",
+    "AlarmType": "Static",
+    "Threshold": 50
+  },	
+  { 
+    "Service": "Lambda",
+    "Metric": "UnreservedConcurrentExecutions",
+    "Priority": "P3",
+    "AlarmType": "Static",
+    "Threshold": 30
+  },
+  { 
+  "Service": "LookoutEquipment",
+  "Metric": "InferenceFailed",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 2
+}, 
+{ 
+  "Service": "LookoutEquipment",
+  "Metric": "InferenceFailed",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 1
+}, 
+{ 
+  "Service": "LookoutEquipment",
+  "Metric": "InferenceFailed",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 0
+}, 
+{ 
+  "Service": "LookoutEquipment",
+  "Metric": "InferenceInvalidInput",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 2
+}, 
+{ 
+  "Service": "LookoutEquipment",
+  "Metric": "InferenceInvalidInput",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 1
+}, 
+{ 
+  "Service": "LookoutEquipment",
+  "Metric": "InferenceInvalidInput",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 0
+},
+{
+  "Service": "AWS/DynamoDB",
+  "Metric": "ConsumedWriteCapacityUnits",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 30
+},
+{
+  "Service": "AWS/DynamoDB",
+  "Metric": "ConsumedWriteCapacityUnits",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 20
+},	
+{ 
+  "Service": "AWS/DynamoDB",
+  "Metric": "ConsumedWriteCapacityUnits",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 10
+},
+{
+  "Service": "AWS/DynamoDB",
+  "Metric": "ConsumedReadCapacityUnits",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 30
+},
+{
+  "Service": "AWS/DynamoDB",
+  "Metric": "ConsumedReadCapacityUnits",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 20
+},	
+{ 
+  "Service": "AWS/DynamoDB",
+  "Metric": "ConsumedReadCapacityUnits",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 10
+},        
+{ 
+  "Service": "IoT",
+  "Metric": "Connect.Success",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 2
+},
+{ 
+  "Service": "IoT",
+  "Metric": "Connect.Success",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 3
+},
+{ 
+  "Service": "IoT",
+  "Metric": "Connect.Success",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 5
+},
+{ 
+  "Service": "IoT",
+  "Metric": "PublishIn.Success",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 2
+},
+{ 
+  "Service": "IoT",
+  "Metric": "PublishIn.Success",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 3
+},
+{ 
+  "Service": "IoT",
+  "Metric": "PublishIn.Success",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 5
+},
+{ 
+  "Service": "IoT",
+  "Metric": "FailedJobExecutionTotalCount",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 50
+},
+{ 
+  "Service": "IoT",
+  "Metric": "FailedJobExecutionTotalCount",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 30
+},
+{ 
+  "Service": "IoT",
+  "Metric": "FailedJobExecutionTotalCount",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 20
+},
+{ 
+  "Service": "LookoutVision",
+  "Metric": "DetectedAnomalyCount",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 5
+},
+{ 
+  "Service": "LookoutVision",
+  "Metric": "DetectedAnomalyCount",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 8
+},
+{ 
+  "Service": "LookoutVision",
+  "Metric": "DetectedAnomalyCount",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 10
+},
+{ 
+  "Service": "LookoutVision",
+  "Metric": "InvalidImageCount",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 6
+},
+{ 
+  "Service": "LookoutVision",
+  "Metric": "InvalidImageCount",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 8
+},
+{ 
+  "Service": "LookoutVision",
+  "Metric": "InvalidImageCount",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 10
+},
+{ 
+  "Service": "LookoutVision",
+  "Metric": "ErrorCount",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 10
+},
+{ 
+  "Service": "LookoutVision",
+  "Metric": "ErrorCount",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 8
+},
+{ 
+  "Service": "LookoutVision",
+  "Metric": "ErrorCount",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 5
+},
+{ 
+  "Service": "IoTSiteWise",
+  "Metric": "Gateway.Heartbeat",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 0
+},
+{ 
+  "Service": "IoTSiteWise",
+  "Metric": "Gateway.Heartbeat",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 3
+},
+{ 
+  "Service": "IoTSiteWise",
+  "Metric": "Gateway.Heartbeat",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 5
+},
+{ 
+  "Service": "SageMaker",
+  "Metric": "Invocation4XXErrors",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 2
+},
+{ 
+  "Service": "SageMaker",
+  "Metric": "Invocation4XXErrors",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 1
+},
+{ 
+  "Service": "SageMaker",
+  "Metric": "Invocation4XXErrors",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 0
+},
+{ 
+  "Service": "SageMaker",
+  "Metric": "Invocation5XXErrors",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 2
+},
+{ 
+  "Service": "SageMaker",
+  "Metric": "Invocation5XXErrors",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 1
+},
+{ 
+  "Service": "SageMaker",
+  "Metric": "Invocation5XXErrors",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 0
+},
+{ 
+  "Service": "CodeBuild",
+  "Metric": "FailedBuilds",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 5
+},
+{ 
+  "Service": "CodeBuild",
+  "Metric": "FailedBuilds",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 3
+},
+{ 
+  "Service": "CodeBuild",
+  "Metric": "FailedBuilds",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 1
+},
+{
+  "Service": "Redshift",
+  "Metric": "CPUUtilization",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 90
+},
+{
+  "Service": "Redshift",
+  "Metric": "CPUUtilization",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 80
+},
+{
+  "Service": "Redshift",
+  "Metric": "CPUUtilization",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 70
+},
+{
+  "Service": "Redshift",
+  "Metric": "HealthStatus",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 1
+},
+{
+  "Service": "Redshift",
+  "Metric": "HealthStatus",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 2
+},
+{
+  "Service": "Redshift",
+  "Metric": "HealthStatus",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 3
+},
+{
+  "Service": "Redshift",
+  "Metric": "ReadLatency",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 0.1
+},
+{
+  "Service": "Redshift",
+  "Metric": "ReadLatency",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold":  0.05
+},
+{
+  "Service": "Redshift",
+  "Metric": "ReadLatency",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 0.025
+},
+{
+  "Service": "Redshift",
+  "Metric": "WriteLatency",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 0.1
+},
+{
+  "Service": "Redshift",
+  "Metric": "WriteLatency",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 0.05
+},
+{
+  "Service": "Redshift",
+  "Metric": "WriteLatency",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 0.025
+},
+{
+  "Service": "Redshift",
+  "Metric": "PercentageDiskSpaceUsed",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 90
+},
+{
+  "Service": "Redshift",
+  "Metric": "PercentageDiskSpaceUsed",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 80
+},
+{
+  "Service": "Redshift",
+  "Metric": "PercentageDiskSpaceUsed",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 70
+},
+{
+  "Service": "WAFV2",
+  "Metric": "BlockedRequests",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 5
+},
+{
+  "Service": "WAFV2",
+  "Metric": "BlockedRequests",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 3
+},
+{
+  "Service": "WAFV2",
+  "Metric": "BlockedRequests",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 1
+},
+{
+  "Service": "ECS",
+  "Metric": "CPUUtilization",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 90
+},
+{
+  "Service": "ECS",
+  "Metric": "CPUUtilization",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 80
+},
+{
+  "Service": "ECS",
+  "Metric": "CPUUtilization",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 70
+},
+{
+  "Service": "ECS",
+  "Metric": "MemoryUtilization",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 90
+},
+{
+  "Service": "ECS",
+  "Metric": "MemoryUtilization",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 80
+},
+{
+  "Service": "ECS",
+  "Metric": "MemoryUtilization",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 70
+},
+{
+  "Service": "ECS/ContainerInsights",
+  "Metric": "CpuUtilized",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 90
+},
+{
+  "Service": "ECS/ContainerInsights",
+  "Metric": "CpuUtilized",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 80
+},
+{
+  "Service": "ECS/ContainerInsights",
+  "Metric": "CpuUtilized",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 70
+},
+{
+  "Service": "ECS/ContainerInsights",
+  "Metric": "MemoryUtilized",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 90
+},
+{
+  "Service": "ECS/ContainerInsights",
+  "Metric": "MemoryUtilized",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 80
+},
+{
+  "Service": "ECS/ContainerInsights",
+  "Metric": "MemoryUtilized",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 70
+},
+{
+  "Service": "EKS/ContainerInsights",
+  "Metric": "node_cpu_utilization",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 70
+},
+{
+  "Service": "EKS/ContainerInsights",
+  "Metric": "node_cpu_utilization",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 80
+},
+{
+  "Service": "EKS/ContainerInsights",
+  "Metric": "node_cpu_utilization",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 90
+},
+{
+  "Service": "EKS/ContainerInsights",
+  "Metric": "node_memory_utilization",
+  "Priority": "P3",
+  "AlarmType": "Static",
+  "Threshold": 70
+},
+{
+  "Service": "EKS/ContainerInsights",
+  "Metric": "node_memory_utilization",
+  "Priority": "P2",
+  "AlarmType": "Static",
+  "Threshold": 80
+},
+{
+  "Service": "EKS/ContainerInsights",
+  "Metric": "node_memory_utilization",
+  "Priority": "P1",
+  "AlarmType": "Static",
+  "Threshold": 90
+}
+
+]

@@ -1,0 +1,93 @@
+{
+  "Comment": "A Step Function to send notification and create service now informational event or incident.",
+  "StartAt": "creating_war_report",
+  "States": {
+    "creating_war_report": {
+      "Type": "Task",
+      "Resource": "${creating_war_report}",
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "creating_war_reportError"
+        }
+      ],
+      "Next": "generate_email_notification"
+    },
+    "creating_war_reportError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "CreateSnowIncident Function"
+      },
+      "Next": "NotifyForLambdaFunctionFailure"
+    },
+    "generate_email_notification": {
+      "Type": "Task",
+      "Resource": "${generate_email_notification}",
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 3,
+          "BackoffRate": 2,
+          "MaxAttempts": 3
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.DataLimitExceeded",
+            "States.Runtime",
+            "States.TaskFailed",
+            "States.Permissions",
+            "States.Timeout",
+            "Lambda.Unknown"
+          ],
+          "Next": "generate_email_notificationError"
+        }
+      ],
+      "End": true
+    },
+    "generate_email_notificationError": {
+      "Type": "Pass",
+      "Parameters": {
+        "Cause.$": "$.Cause",
+        "Execution.$": "$$.Execution.Id",
+        "StateMachine.$": "$$.StateMachine.Name",
+        "ErrorMessageFrom": "CreateSnowIncident Function"
+      },
+      "Next": "NotifyForLambdaFunctionFailure"
+    },
+    "NotifyForLambdaFunctionFailure": {
+      "Comment": "This step will send an error notification email via SNS.",
+      "Type": "Task",
+      "Resource": "${NotifyForLambdaFunctionFailure}",
+      "TimeoutSeconds": 900,
+      "End": true
+    }
+  }
+}

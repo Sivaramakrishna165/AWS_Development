@@ -1,0 +1,33 @@
+---
+# Feature Definition (FD) for the ConfigRuleS3PublicWrite
+# This is a feature that creates Config rule to prohibit S3 public write
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: ConfigRuleS3PublicWrite
+Version: '2.1.0.1'
+StandardCreationBatch: 2
+EnableFeature: true
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose:  AWS Config rule to prohibit s3 public write
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - S3BucketPublicWriteProhibited.yaml
+DependsOnFeature:
+  - ConfigService

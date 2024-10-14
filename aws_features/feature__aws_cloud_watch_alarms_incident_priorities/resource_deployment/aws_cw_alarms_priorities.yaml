@@ -1,0 +1,344 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'A regional template which creates a CloudWatch event rule which calls a Lambda function to process AWS Health RISK events or all events and send a notification to ServiceNow'
+Parameters:
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/AWSCloudWatchAlarmsIncidentPriorities/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pServiceNowInputTopic:
+    Description: 'ssm parameter for servicenow sns topic' 
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/SES/Module/CommonServicenow/ComSnowStdInputArn"
+  pCustomerName:
+    Description: 'ssm parameter for servicenow sns topic' 
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "	/DXC/Main/CustomerName"
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+  pCWAlarmIncidentTopicDefault:
+    Description: '[Do Not change] Default SNS Topic for creating priority based Incidents'
+    Default: 'DXCMS-CW-Alarms-Create-Incidents'
+    Type: String
+  pCWAlarmIncidentTopicP1:
+    Description: '[Do Not change] SNS Topic for creating priority based Incidents with Priority P1'
+    Default: 'DXCMS-CW-Alarms-Create-Incidents-P1'
+    Type: String
+  pCWAlarmIncidentTopicP2:
+    Description: '[Do Not change] SNS Topic for creating priority based Incidents with Priority P2'
+    Default: 'DXCMS-CW-Alarms-Create-Incidents-P2'
+    Type: String
+  pCWAlarmIncidentTopicP3:
+    Description: '[Do Not change] SNS Topic for creating priority based Incidents with Priority P3'
+    Default: 'DXCMS-CW-Alarms-Create-Incidents-P3'
+    Type: String
+  pServicenowBusinessService:
+    Type: "String"
+    Default: "/DXC/ServiceNow/BusinessService"
+    Description: "Business Service name"
+
+Resources:
+
+  rCWPriority1Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref pCWAlarmIncidentTopicP1
+      Subscription:
+        - Endpoint: !GetAtt rDxcmsAssignPrioritiesLambda.Arn
+          Protocol: lambda
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+      - Key: Name
+        Value: !Sub rCWPriority1Topic
+      - Key: Owner
+        Value: DXC
+  
+  rCWPriority2Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref pCWAlarmIncidentTopicP2
+      Subscription:
+        - Endpoint: !GetAtt rDxcmsAssignPrioritiesLambda.Arn
+          Protocol: lambda
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+      - Key: Name
+        Value: !Sub rCWPriority2Topic
+      - Key: Owner
+        Value: DXC
+  
+  rCWPriority3Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref pCWAlarmIncidentTopicP3
+      Subscription:
+        - Endpoint: !GetAtt rDxcmsAssignPrioritiesLambda.Arn
+          Protocol: lambda
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+      - Key: Name
+        Value: !Sub rCWPriority3Topic
+      - Key: Owner
+        Value: DXC
+
+  rAssignPriorityTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref pCWAlarmIncidentTopicDefault
+      Subscription:
+        - Endpoint: !GetAtt rDxcmsAssignPrioritiesLambda.Arn
+          Protocol: lambda
+      Tags:
+      - Key: Application
+        Value: !Ref AWS::StackName
+      - Key: Name
+        Value: !Sub rAssignPriorityTopic
+      - Key: Owner
+        Value: DXC
+  
+  rCWAlarmIncidentTopicParam:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: "/DXC/Alarms/CreateIncident-Default"
+      Description: "Default SNS topic for CW alarms to create priority based incidents in service-now"
+      Type: "String"
+      Value: !Ref rAssignPriorityTopic
+
+  rCWAlarmIncidentTopicP1Param:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: "/DXC/Alarms/CreateIncident-P1"
+      Description: "SNS topic for CW alarms to create P1 based incidents in service-now"
+      Type: "String"
+      Value: !Ref rCWPriority1Topic
+    
+  rCWAlarmIncidentTopicP2Param:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: "/DXC/Alarms/CreateIncident-P2"
+      Description: "SNS topic for CW alarms to create P2 based incidents in service-now"
+      Type: "String"
+      Value: !Ref rCWPriority2Topic
+  
+  rCWAlarmIncidentTopicP3Param:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: "/DXC/Alarms/CreateIncident-P3"
+      Description: "SNS topic for CW alarms to create P3 based incidents in service-now"
+      Type: "String"
+      Value: !Ref rCWPriority3Topic
+
+  rAssignPriorityTopicPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      SourceArn: !Ref rAssignPriorityTopic
+      FunctionName: !GetAtt rDxcmsAssignPrioritiesLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+  
+  rCWPriority1TopicPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      SourceArn: !Ref rCWPriority1Topic
+      FunctionName: !GetAtt rDxcmsAssignPrioritiesLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+  
+  rCWPriority2TopicPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      SourceArn: !Ref rCWPriority2Topic
+      FunctionName: !GetAtt rDxcmsAssignPrioritiesLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+
+  rCWPriority3TopicPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      SourceArn: !Ref rCWPriority3Topic
+      FunctionName: !GetAtt rDxcmsAssignPrioritiesLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+
+  rDxcmsCWAlarmsPrioritiesDdbTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "Service-Metric-Priority"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "Service-Metric-Priority"
+          KeyType: "HASH"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: "Purpose"
+          Value: "AWS CloudWatch Alarms Incident Priorities"
+      TableName: FtCloudWatchAlarmsIncidentPriorities
+
+  rDxcmsAddCWAlarmsToDDBLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsAddCWAlarmsToDDBLambdaRole
+      - Key: Owner
+        Value: DXC
+      Policies:
+        - PolicyName: !Join ["-", ["AddCWAlarmsToDDBLambdaPer", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-add-cw-alarms-priorities-to-ddb:*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FtCloudWatchAlarmsIncidentPriorities"
+
+  rDxcmsAddCWAlarmsToDDBLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "dxcms-add-cw-alarms-priorities-to-ddb"
+      Environment:
+        Variables:
+          STACK_REGION: !Sub '${AWS::Region}'
+          EXECUTION_ACCOUNT: !Sub '${AWS::AccountId}'
+          CWAlarmsDDB: !Ref rDxcmsCWAlarmsPrioritiesDdbTable
+      Description: 'Add CW alarms priorites to dynamoDB table.'
+      Runtime: python3.11
+      Handler: dxcms_add_cw_alarms_priorities_to_db.handler
+      MemorySize: 128
+      Role: !GetAtt rDxcmsAddCWAlarmsToDDBLambdaRole.Arn
+      Timeout: 900
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/add_priorities_in_dynamo.zip"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+
+
+  rDxcmsAssignPriorityLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsAssignPriorityLambdaRole
+      - Key: Owner
+        Value: DXC
+      Policies:
+        - PolicyName: !Join ["-", ["AssignPrioritiesLambdaPer", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-cw-alarms-create-incidents:*"
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/DXC/ServiceNow/BusinessService"                  
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FtCloudWatchAlarmsIncidentPriorities"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FeatureCommonServicenowStack-Servicenow-*"
+
+  rDxcmsAssignPrioritiesLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "dxcms-cw-alarms-create-incidents"
+      Environment:
+        Variables:
+          STACK_REGION: !Sub '${AWS::Region}'
+          EXECUTION_ACCOUNT: !Sub '${AWS::AccountId}'
+          CWAlarmsDDB: !Ref rDxcmsCWAlarmsPrioritiesDdbTable
+          servicenow_topic: !Ref pServiceNowInputTopic
+          CustomerName: !Ref pCustomerName
+          Business_service: !Ref pServicenowBusinessService
+      Description: 'Assign priorites to CW alarms and create incidents in service-now.'
+      Runtime: python3.11
+      Handler: dxcms_cw_alarms_create_incidents.handler
+      MemorySize: 128
+      Role: !GetAtt rDxcmsAssignPriorityLambdaRole.Arn
+      Timeout: 900
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/cw_alarms_create_incidents.zip"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+
+  customAddAlarmPriorities:
+    Type: Custom::AddAlarmPrioritiesToDDB
+    DependsOn: rDxcmsAddCWAlarmsToDDBLambda
+    Properties:
+      ServiceToken: !GetAtt rDxcmsAddCWAlarmsToDDBLambda.Arn
+      pUpdateHash: !Ref pAutoUpdateHash

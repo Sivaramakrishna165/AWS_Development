@@ -1,0 +1,102 @@
+---
+# Feature Definition (FD) for Elastic Disaster Recovery
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: ElasticDisasterRecovery
+Version: '10.0.0.3'
+StandardCreationBatch: 4
+EnableFeature: false
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: AWS Elastic Disaster Recovery solution
+
+FeatureParams:
+
+  pRecoveryregionDeployment:
+    Type: String
+    Description: "To deploy the Primary/Recovery resources in the respective regions. If true, then the recovery region resources will be deployed. If false, then primary region resources will be deployed"
+    Default: 'false'
+    AllowedValues: ['true', 'false']    
+
+  pPrimaryRegionName:
+    Type: String
+    Description: "Provide the primary region name where the primary instance deployed"    
+    Default: ''
+
+  pRecoveryRegionName:
+    Type: String
+    Description: "Provide the recovery region name where the recovery instance deployed"    
+    Default: ''
+
+  pRecoveryCopyPrivateIp:
+    Type: String
+    Description: "To copy the source server private ip address to the recovery instance. If providing true, make sure the source server's vpc cidr block and recovery instance cidr block are same"        
+    Default: 'false' 
+    AllowedValues: ['true', 'false']  
+    
+  pRecoveryLaunchDisposition:
+    Type: String
+    Description: "The state of the recovery instance after it gets launched. By default the recovery instance will be started"
+    Default: 'STARTED'
+    AllowedValues: ['STARTED', 'STOPPED']
+   
+  pRecoveryTargetInstanceTypeRightSizingMethod:
+    Type: String
+    Description: "The option for choosing the recovery instance type. If NONE, the EDR will pick the instance type from pRecoveryInstanceType(launch template). To allow EDR to choose the instance type, change it to BASIC"
+    Default: 'NONE'
+    AllowedValues: ['BASIC', 'NONE']   
+
+  pRecoveryInstanceType:
+    Type: String
+    Description: "The option for choosing the recovery instance type. If pRecoveryTargetInstanceTypeRightSizingMethod is NONE, then instance type will be picked from here. By default t3.medium"
+    Default: 't3.medium'
+    
+  pRecoverySubnetId:
+    Description: "The subnet id where the recovery instance gets launched.If not provided, default private subnet that is part of workload vpc from the recovery region will be used"
+    Type: String
+    Default: ''
+    
+  pRecoverySecurityGroup:
+    Description: "Provide the security group that needs to be attached with the recovery instance.If not provided, default hardening security group that is part of workload vpc from the recovery region will be used"
+    Type: String
+    Default: ''
+
+  pRecoveryKeyPair:
+    Description: "Provide the key pair that needs to be attached with the recovery instance.If not provided, default hardening key pair from the recovery region will be used"
+    Type: String
+    Default: ''      
+
+  pPrimaryServerVpcId:
+    Description: "The primary(source) server vpc id. If not provided, the default workload vpc id from the primary region will be used"
+    Type: String
+    Default: ''
+
+  pPrimaryServerSubnetId:
+      Description: "The primary(source) server subnet ids. For multiple values use comma seperation. If not provided, the default private subnet ids from the primary region will be used"
+      Type: String
+      Default: ''
+
+  pReplicationInstanceType:
+    Type: String
+    Description: "The option for choosing the replication instance type. By default, t3.medium"
+    Default: 't3.medium'  
+
+  pReplicationPitRetentionInDays:
+    Type: Number
+    Description: "The Point-In-Time recovery retention (in days) for the daily backup. By default, the daily backup will be retained for 2 days"
+    Default: 2
+    
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String    
+     
+AllowDisable: true
+ResourceDeployment:
+  - elastic_disaster_recovery.yaml

@@ -1,0 +1,123 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Create CloudWatch alarms for the AWS Glue service'
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/AWSGlueMonitoring/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pCommonIncidentTopic:
+    Description: SSM Param to create the Incidents in Service-Now with priroity fetched from DDB - FtCloudWatchAlarmsIncidentPriorities
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Alarms/CreateIncident-Default
+  pAutoUpdateHash:
+    Description: '[Do Not change] Required to Create/Update the Feature automatically on ses-standards-master update'
+    Default: '0'
+    Type: String
+  pNotifyEmail:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/Notification/DXCNotifyEmail
+    Description: "Email address for getting Notifications of AWS Glue alarms creation status"
+  pSESLayerArn:
+    Description: "SSM parameter for Lambda Layer ARN"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/SES/SESLayerLambdaArn
+
+Resources:
+  rAwsGlueAlarmNotifyTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: !Ref pNotifyEmail
+          Protocol: email
+
+  rDxcmsAwsGlueMonitoringLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsAwsGlueMonitoringLambdaRole
+      - Key: Owner
+        Value: DXC
+      Policies:
+        - PolicyName: !Join ["-", ["DxcmsAwsGlueMonLambdaPerms", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-aws-glue-monitoring:*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AccountFeatureDefinitions"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - !Ref rAwsGlueAlarmNotifyTopic
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DescribeAlarms
+                Resource: '*'
+
+  rDxcmsAwsGlueMonitoringLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "dxcms-aws-glue-monitoring"
+      Environment:
+        Variables:
+          STACK_REGION: !Sub '${AWS::Region}'
+          EXECUTION_ACCOUNT: !Sub '${AWS::AccountId}'
+          CommonIncidentTopic: !Ref pCommonIncidentTopic
+          NotifyEmailTopic: !Ref rAwsGlueAlarmNotifyTopic
+      Description: 'Create cloudwatch alarms for Aws Glue service'
+      Runtime: python3.11
+      Handler: dxcms_aws_glue_monitoring.handler
+      MemorySize: 128
+      Role: !GetAtt rDxcmsAwsGlueMonitoringLambdaRole.Arn
+      Timeout: 900
+      Layers:
+        - !Ref pSESLayerArn
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/aws_glue_monitoring.zip"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+
+  customInvokeLambda:
+    Type: Custom::AwsGlueAlarmsCreate
+    DependsOn: rDxcmsAwsGlueMonitoringLambda
+    Properties:
+        ServiceToken: !GetAtt rDxcmsAwsGlueMonitoringLambda.Arn
+        pUpdateHash: !Ref pAutoUpdateHash

@@ -1,0 +1,237 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: DXC Managed Services - AWS Native BackUp for RDS
+
+Parameters:
+
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/NativebackupRds/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+
+  pPlatformVersion:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/Main/pPlatformVersion
+    Description: "[DO NOT CHANGE] SSM Parameter for platform version"
+  
+  pfCreateNewBackupVault:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+    Description: "Create new Backup Vault for RDS Backup."
+
+  pfBackupVaultName:
+    Type: String
+    Description: "Enter the Backup Vault Name to be create for RDS"
+    Default: 'RdsBackUpVault'
+
+  pfBackupPlanName:
+    Type: String
+    Default: "Rds-BackUp-Plan"
+    Description: "AWS RDS Backup plan name."
+
+  pfBackupRuleName:
+    Type: String
+    Default: "Rds-RuleName"
+    Description: "AWS RDS Backup rule name."
+
+  pfRdsBackupScheduleExpression:
+    Type: String
+    Default: "cron(15 12 * * ? *)"
+    Description: "AWS Backup cron expression."
+
+  pfBackupDeleteAfterDays:
+    Type: Number
+    Default: 30
+    Description: "Days to expire backups from vault."
+
+  pfBackupSelectionName:
+    Type: String
+    Default: "Rds-SelectionName"
+    Description: "AWS Backup selection name."
+
+  pfBackupConditionTagKey:
+    Type: String
+    Default: "aws:ResourceTag/Owner"
+    Description: "Tag:Key associated with the resources to back up."
+
+  pfBackupConditionTagValue:
+    Type: String
+    Default: "DXC"
+    Description: "Tag:Value associated with the resources to back up."
+
+  pfVaultMinRetentionDays:
+    Type: String
+    Default: 30
+    Description: "Retention period in days that the vault retains backup data."
+  
+  pEnableContinuousBackup:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Continuous backup for RDS"
+
+  # pfVaultMaxRetentionDays:
+  #   Type: String
+  #   #Default: 30
+  #   Default: "dummy"
+  #   Description: "The maximum retention period that the vault retains its recovery points.
+  #                 Note: Leave it default if you don't need this"
+
+  # pfVaultChangeableForDays:
+  #   Type: String
+  #   Default: "dummy"
+  #   Description: "[WARNING] Number of days before the vault lock. After this period, Vault Lock becomes immutable and cannot be changed or deleted.\n
+  #                 NOTE: If this value is mentioned then, LockConfiguration will be Compliance mode otherwise Governance mode.\n
+  #                 Should be minimum 3 or greater"
+
+  pfSnowInciPriority:
+    Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor, 4-warning, 5-ok (can be updated if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3', '4', '5']
+
+
+Conditions:
+
+  cCreateNewBackupVault: !Equals [!Ref pfCreateNewBackupVault, "true"]
+  cEnableContinuousBackup: !Equals [!Ref pEnableContinuousBackup, "true"]
+  cDontCreateNewBackupVault: !Equals [!Ref pfCreateNewBackupVault, "false"]
+  # All these will be used in future
+  #cComplianceMode: !Not [!Equals [!Ref pfVaultChangeableForDays, "dummy"]]
+  #cGovernanceMode: !Equals [!Ref pfVaultChangeableForDays, ""]
+  #cVaultMinRetNotDeclared: !Equals [!Ref pfVaultMinRetentionDays, "dummy"]
+  #cVaultMaxRetNotDeclared: !Equals [!Ref pfVaultMaxRetentionDays, "dummy"]
+  #cVaultLockRequired: !And [!Not [!Equals [!Ref pfVaultMinRetentionDays, ""]] , !Not [!Equals [!Ref pfVaultChangeableForDays, ""]]]
+
+Resources:
+
+  rRdsBkUpIamRole:
+    Type: 'AWS::IAM::Role'
+    Properties: 
+      AssumeRolePolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "backup.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+      Description: "Allows AWS Backup to access AWS resources on your behalf to Backup and Restore."
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+      Path: /
+      RoleName: !Join ["-", ["RDSNativeBackup", !Ref "AWS::Region"]]
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: "rRdsBkUpIamRole"
+      - Key: Owner
+        Value: 'DXC'
+      - Key: Purpose
+        Value: "RdsBackup"       
+
+  rRdsBackupVault:
+    Type: AWS::Backup::BackupVault
+    DeletionPolicy: Retain
+    Condition: cCreateNewBackupVault
+    Properties:
+      #AccessPolicy: Json
+      BackupVaultName: !Ref pfBackupVaultName
+      LockConfiguration:
+      #for now we will go with GOVERNANCE mode ONLY
+        #ChangeableForDays:  !If [cComplianceMode, !Ref pfVaultChangeableForDays, !Ref "AWS::NoValue"]
+        MinRetentionDays: !Ref pfVaultMinRetentionDays
+        #MaxRetentionDays: !If [cVaultMaxRetNotDeclared, !Ref "AWS::NoValue", !Ref pfVaultMaxRetentionDays]
+      #Notifications: NotificationObjectTyp
+      BackupVaultTags:
+        "Owner" : "DXC"
+
+  rRdsBackUpPlan:
+    Type: AWS::Backup::BackupPlan
+    DependsOn: rRdsBackupVault
+    Condition: cCreateNewBackupVault
+    Properties:
+      BackupPlan: 
+        BackupPlanName: !Ref pfBackupPlanName
+        BackupPlanRule:
+          - 
+            RuleName: !Ref pfBackupRuleName
+            StartWindowMinutes: 60
+            TargetBackupVault: !Ref pfBackupVaultName
+            EnableContinuousBackup: !If [cEnableContinuousBackup, True, !Ref "AWS::NoValue"]    
+            ScheduleExpression: !Ref pfRdsBackupScheduleExpression
+            Lifecycle: {
+                DeleteAfterDays: !Ref pfBackupDeleteAfterDays
+            }
+  rRdsBackUpPlanUpd:
+    Type: AWS::Backup::BackupPlan
+    Condition: cDontCreateNewBackupVault
+    Properties:
+      BackupPlan: 
+        BackupPlanName: !Ref pfBackupPlanName
+        BackupPlanRule:
+          - 
+            RuleName: !Ref pfBackupRuleName
+            StartWindowMinutes: 60
+            TargetBackupVault: !Ref pfBackupVaultName
+            EnableContinuousBackup: !If [cEnableContinuousBackup, True, !Ref "AWS::NoValue"]    
+            ScheduleExpression: !Ref pfRdsBackupScheduleExpression
+            Lifecycle: {
+                DeleteAfterDays: !Ref pfBackupDeleteAfterDays
+            }
+
+  rRdsStorageBackupSelection:
+    Type: AWS::Backup::BackupSelection
+    DependsOn: rRdsBackUpPlan
+    Condition: cCreateNewBackupVault
+    Properties:
+      BackupPlanId: !Ref rRdsBackUpPlan
+      BackupSelection: 
+        SelectionName: !Ref pfBackupSelectionName
+        IamRoleArn: !GetAtt rRdsBkUpIamRole.Arn
+        Resources: 
+          - "arn:aws:rds:*:*:db:*"
+        Conditions:
+          StringEquals:
+            - ConditionKey: !Ref pfBackupConditionTagKey
+              ConditionValue: !Ref pfBackupConditionTagValue
+  
+  rRdsStorageBackupSelectionupd:
+    Type: AWS::Backup::BackupSelection
+    DependsOn: rRdsBackUpPlanUpd
+    Condition: cDontCreateNewBackupVault
+    Properties:
+      BackupPlanId: !Ref rRdsBackUpPlanUpd
+      BackupSelection: 
+        SelectionName: !Ref pfBackupSelectionName
+        IamRoleArn: !GetAtt rRdsBkUpIamRole.Arn
+        Resources: 
+          - "arn:aws:rds:*:*:db:*"
+        Conditions:
+          StringEquals:
+            - ConditionKey: !Ref pfBackupConditionTagKey
+              ConditionValue: !Ref pfBackupConditionTagValue
+
+

@@ -1,0 +1,30 @@
+---
+# Feature Definition (FD) for OsCisComplianceCheck
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: OsCisComplianceCheck
+Version: '9.0.0.5'
+StandardCreationBatch: 1
+EnableFeature: true
+FeatureParams:
+  pInstanceOSCISUpdateFrequency:
+    Description: "[Required] The schedule (Rate) to trigger rInstanceOSCISComplianceLambda"
+    Type: String
+    AllowedValues:
+      - "rate(30 days)"
+      - "rate(15 days)"
+      - "rate(7 days)"
+    Default: "rate(30 days)"
+  
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: checks the OS CIS Compliance for all the Instances having Tag:Compliance
+AllowDisable: true
+ResourceDeployment:
+  - os_cis_compliance_check.yaml

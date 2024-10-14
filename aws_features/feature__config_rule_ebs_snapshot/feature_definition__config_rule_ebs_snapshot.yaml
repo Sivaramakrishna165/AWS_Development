@@ -1,0 +1,40 @@
+---
+# Feature Definition (FD) for the ConfigRuleEbsSnapshot
+# This is a feature that creates AWS Config rule which checks (by default)
+#  whether completed instances have the following tags
+# "Application, Name, Environment, InstanceName, Owner, Project, DeleteOn, Compliance"
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: ConfigRuleEbsSnapshot
+Version: '10.0.0.4'
+StandardCreationBatch: 2
+EnableFeature: true
+FeatureParams:  
+  pFtEbsSnapVolumeIdListToSkip:
+    Type: String
+    Default: "Blank"
+    Description: "List of volumes to be skipped from compliance check.For multiple volumes use comma separation."
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: AWS Config rule to verify whether completed snapshots have mentioned tags
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - EbsSnapshotConfig.yaml
+DependsOnFeature:
+  - ConfigService

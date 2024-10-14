@@ -1,0 +1,115 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: " This feature will create an AWS IAM Access Analyzer - external access analyzer"
+
+Parameters:
+# 3 required SES parameters
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: "/DXC/SES/Module/AwsIamAccessAnalyzer/S3AssetBucket"
+    Description: "SSM Parameter for bucket location"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+# Feature parameters
+  pFtAwsIamAccAnalAnalyzerName:
+    Type: String
+    Default: 'dxcms-ExternalAccessAnalyzer'
+    Description: 'account and region will be appended to the External Access Analyzer name'
+  pFtAwsIamAccAnalType:
+    Type: String
+    Default: 'ACCOUNT'
+    AllowedValues:
+      - ACCOUNT
+    Description: 'Phase 1 only implements external access analyzer'
+  pUpdateHash:
+    Description: 'To update this feature, increment the hash prior to running ses-standards-master update'
+    Default: '0'
+    Type: String
+
+Resources:
+  rDxcmsIamAccessAnalyzerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsIamAccessAnalyzerLambdaRole
+      - Key: Owner
+        Value: DXC
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/IAMAccessAnalyzerFullAccess"
+      Policies:
+        - PolicyName: !Join ["-", ["DxcmsIamAccessAnalyzerLambdaPerms", !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/dxcms-iam-access-analyzer-lambda:*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:GetItem
+                  - dynamodb:ListTables
+                  - dynamodb:PutItem
+                  - dynamodb:TagResource
+                  - dynamodb:UpdateItem
+                  - dynamodb:UpdateTable
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/dxcms-iam-access-analyzer" 
+
+  rDxcmsIamAccessAnalyzerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: "dxcms-iam-access-analyzer-lambda"
+      Environment:
+        Variables:
+          STACK_REGION: !Sub '${AWS::Region}'
+          EXECUTION_ACCOUNT: !Sub '${AWS::AccountId}'
+          ANALYZER_NAME: !Ref pFtAwsIamAccAnalAnalyzerName
+          ANALYZER_TYPE: !Ref pFtAwsIamAccAnalType
+      Description: 'Create an AWS IAM Access Analyzer - External Access Analyzer'
+      Runtime: python3.11
+      Handler: aws_iam_access_analyzer.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt rDxcmsIamAccessAnalyzerLambdaRole.Arn
+      Timeout: 900
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/aws_iam_access_analyzer.zip"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Owner
+        Value: DXC
+
+  customInvokeLambda:
+    Type: Custom::DxcmsIamAccessAnalyzerCreate
+    DependsOn: rDxcmsIamAccessAnalyzerLambda
+    Properties:
+      ServiceToken: !GetAtt rDxcmsIamAccessAnalyzerLambda.Arn
+      pUpdateHash: !Ref pUpdateHash

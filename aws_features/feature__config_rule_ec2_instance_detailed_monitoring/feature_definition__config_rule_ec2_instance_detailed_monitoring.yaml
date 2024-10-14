@@ -1,0 +1,34 @@
+---
+# Feature Definition (FD) for the ec2instancedetailedmonitoring
+# This is a feature that creates AWS Config rule which checks
+#  whether detailed monitoring is enabled for EC2 instances
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: ConfigRuleEc2InstanceDetailedMonitoring
+Version: '2.1.0.1'
+StandardCreationBatch: 2
+EnableFeature: true
+Standards:
+  - Gold
+Owner:
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: AWS Config rule to check whether detailed monitoring is enabled for EC2 instances
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - ec2instance-detailed-monitoring-enabled.yaml
+DependsOnFeature:
+  - ConfigService

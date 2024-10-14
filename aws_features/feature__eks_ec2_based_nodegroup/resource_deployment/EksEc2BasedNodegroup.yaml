@@ -1,0 +1,409 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Creation of EKS EC2 based Node group. Launch template, Monitoring will be part of another feature.
+
+Parameters:
+
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/EksEc2BasedNodegroup/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+
+  ClusterName:
+    Description: Name of the EKS cluster
+    Type: String
+    Default: ''
+
+  KeyName:
+    #Type: "AWS::EC2::KeyPair::KeyName"
+    Type: String
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Default: ""
+
+  NodeAutoScalingGroupDesiredCapacity:
+    Type: Number
+    Default: 2
+    Description: Desired capacity of Node Group ASG.
+
+  NodeAutoScalingGroupMaxSize:
+    Type: Number
+    Default: 5
+    Description: Maximum size of Node Group ASG. Set to at least 1 greater than NodeAutoScalingGroupDesiredCapacity.
+
+  NodeAutoScalingGroupMinSize:
+    Type: Number
+    Default: 2
+    Description: Minimum size of Node Group ASG.
+
+  NodeImageId:
+    Type: String
+    Default: ""
+    Description: Specify your custom image ID. This must be a Hardened AMI.
+
+  DisableIMDSv1:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "false"
+      - "true"
+
+  NodeInstanceType:
+    Type: String
+    Default: t3.large
+    ConstraintDescription: Must be a valid EC2 instance type
+    Description: EC2 instance type for the node instances. Provide instance type that supports uefi boot mode. eg t3.medium, r5.xlarge, c7gn.large, m6idn.4xlarge etc
+    
+  NodeVolumeSize:
+    Type: Number
+    Default: 50
+    Description: Node volume size
+
+  VpcId:
+    Type: "AWS::EC2::VPC::Id"
+    #Type: String
+    Description: The VPC of the worker instances
+
+  Subnets:
+    #Type: "List<AWS::EC2::Subnet::Id>"
+    Type: String
+    Default: "dummy"
+    Description: The subnets where workers can be created.
+  
+  ClusterControlPlaneSecurityGroup:
+    Type: String
+    Default: ""
+    Description: Cluster security group id.
+
+  BootstrapArguments:
+    Type: String
+    Default: ""
+    Description: "Arguments to pass to the bootstrap script. See files/bootstrap.sh in https://github.com/awslabs/amazon-eks-ami"
+
+  ClusterBackupBucket:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /DXC/EKSCluster-Backup/Bucket
+    Description: SSM Parameter that stores EKS Cluster backup bucket name.
+
+Mappings:
+  PartitionMap:
+    aws:
+      EC2ServicePrincipal: "ec2.amazonaws.com"
+    aws-us-gov:
+      EC2ServicePrincipal: "ec2.amazonaws.com"
+    aws-cn:
+      EC2ServicePrincipal: "ec2.amazonaws.com.cn"
+
+Conditions:
+
+  IMDSv1Disabled:
+    "Fn::Equals":
+      - !Ref DisableIMDSv1
+      - "true"
+
+  cSubnetNOTProvided: !Equals [!Ref Subnets, 'dummy']
+
+Resources:
+
+  InvokeGetPrivateSubnets:
+    Type: "Custom::InvokeGetPrivateSubnets"
+    Condition: cSubnetNOTProvided
+    Properties:
+      ServiceToken: !Join ["", ["arn:aws:lambda:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":function:getPrivateSubnets"]]
+      VPCID: !Ref VpcId
+
+  NodeInstanceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !FindInMap [PartitionMap, !Ref "AWS::Partition", EC2ServicePrincipal]
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKS_CNI_Policy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Path: /
+      Policies:
+      - PolicyName: logs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'logs:CreateLogGroup'
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+            - 'logs:DescribeLogStreams'
+            Resource:
+            - 'arn:aws:logs:*:*:*'
+      - PolicyName: Backup-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'ec2:CreateTags'
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - 'ec2:DescribeInstances'
+            - 'ec2:DescribeVolumes'
+            - 'ec2:CreateSnapshot'
+            Resource: '*'
+      - PolicyName: CloudWatchEventsPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'events:DescribeRule'
+            - 'events:ListRuleNamesByTarget'
+            - 'events:EnableRule'
+            - 'events:ListRules'
+            - 'events:ListTargetsByRule'
+            - 'events:PutEvents'
+            - 'events:PutTargets'
+            - 'events:TestEventPattern'
+            Resource: '*'
+      - PolicyName: CloudWatchLogsPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'cloudwatch:PutMetricData'
+            - 'cloudwatch:PutMetricAlarm'
+            - 'cloudwatch:GetMetricsStatistics'
+            - 'cloudwatch:ListMetrics'
+            - 'ec2:DescribeTags'
+            - 'logs:CreateLogGroup'
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+            - 'logs:DescribeLogStreams'
+            - 'logs:DescribeLogGroups'
+            - 'logs:PutRetentionPolicy'
+            - 's3:ListBucket'
+            - 's3:GetObject'
+            - 's3:ListBucketVersions'
+            Resource: '*'
+      - PolicyName: workerautoscaler
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'autoscaling:DescribeAutoScalingGroups'
+            - 'autoscaling:DescribeAutoScalingInstances'
+            - 'autoscaling:DescribeLaunchConfigurations'
+            - 'autoscaling:DescribeTags'
+            - 'autoscaling:SetDesiredCapacity'
+            - 'autoscaling:TerminateInstanceInAutoScalingGroup'
+            - 'ec2:DescribeLaunchTemplateVersions'
+            Resource: '*'
+      - PolicyName: VeleroBackupPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - "s3:GetObject"
+            - "s3:DeleteObject"
+            - "s3:PutObject"
+            - "s3:AbortMultipartUpload"
+            - "s3:ListMultipartUploadParts"
+            - "s3:ListBucket"
+            Resource: 
+            - !Sub "arn:aws:s3:::${ClusterBackupBucket}"
+            - !Sub "arn:aws:s3:::${ClusterBackupBucket}/*"
+          - Effect: Allow
+            Action:
+            - "ec2:DescribeVolumes"
+            - "ec2:DescribeSnapshots"
+            - "ec2:CreateTags"
+            - "ec2:CreateVolume"
+            - "ec2:CreateSnapshot"
+            - "ec2:DeleteSnapshot"
+            Resource: '*'
+  
+  NodeSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Security group for all nodes in the cluster
+      Tags:
+        - Key: !Sub kubernetes.io/cluster/${ClusterName}
+          Value: owned
+        - Key: Owner
+          Value: DXC
+      VpcId: !Ref VpcId
+
+  NodeSecurityGroupIngress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    DependsOn: NodeSecurityGroup
+    Properties:
+      Description: Allow node to communicate with each other
+      FromPort: 0
+      GroupId: !Ref NodeSecurityGroup
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !Ref NodeSecurityGroup
+      ToPort: 65535
+
+  NodeSecurityGroupIngressSSH:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    DependsOn: NodeSecurityGroup
+    Properties:
+      Description: Allow node to Login to Linux Worker nodes
+      FromPort: 22
+      GroupId: !Ref NodeSecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref NodeSecurityGroup
+      ToPort: 22
+
+  ControlPlaneIngressFromWorkerNodesHttps:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Allow incoming HTTPS traffic (TCP/443) from worker nodes (for API server)
+      GroupId: !Ref ClusterControlPlaneSecurityGroup
+      SourceSecurityGroupId: !Ref NodeSecurityGroup
+      IpProtocol: tcp
+      ToPort: 443
+      FromPort: 443
+
+  ControlPlaneEgressToNodeSecurityGroup:
+    Type: "AWS::EC2::SecurityGroupEgress"
+    DependsOn: NodeSecurityGroup
+    Properties:
+      Description: Allow the cluster control plane to communicate with worker Kubelet and pods
+      DestinationSecurityGroupId: !Ref NodeSecurityGroup
+      FromPort: 1025
+      GroupId: !Ref ClusterControlPlaneSecurityGroup
+      IpProtocol: tcp
+      ToPort: 65535
+
+  ControlPlaneEgressToNodeSecurityGroupOn443:
+    Type: "AWS::EC2::SecurityGroupEgress"
+    DependsOn: NodeSecurityGroup
+    Properties:
+      Description: Allow the cluster control plane to communicate with pods running extension API servers on port 443
+      DestinationSecurityGroupId: !Ref NodeSecurityGroup
+      FromPort: 443
+      GroupId: !Ref ClusterControlPlaneSecurityGroup
+      IpProtocol: tcp
+      ToPort: 443
+
+  NodeSecurityGroupFromControlPlaneIngress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    DependsOn: NodeSecurityGroup
+    Properties:
+      Description: Allow worker Kubelets and pods to receive communication from the cluster control plane
+      FromPort: 1025
+      GroupId: !Ref NodeSecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref ClusterControlPlaneSecurityGroup
+      ToPort: 65535
+
+  NodeSecurityGroupFromControlPlaneOn443Ingress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    DependsOn: NodeSecurityGroup
+    Properties:
+      Description: Allow pods running extension API servers on port 443 to receive communication from cluster control plane
+      FromPort: 443
+      GroupId: !Ref NodeSecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref ClusterControlPlaneSecurityGroup
+      ToPort: 443
+
+  NodeLaunchTemplate:
+    Type: "AWS::EC2::LaunchTemplate"
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              DeleteOnTermination: true
+              VolumeSize: !Ref NodeVolumeSize
+              Encrypted: true
+              VolumeType: gp3
+        ImageId: !Ref NodeImageId
+        InstanceType: !Ref NodeInstanceType
+        KeyName: !Ref KeyName
+        Monitoring: 
+          Enabled: true
+        SecurityGroupIds:
+        - !Ref NodeSecurityGroup
+        MetadataOptions:
+          HttpPutResponseHopLimit : 2
+          HttpEndpoint: enabled
+          HttpTokens: !If
+            - IMDSv1Disabled
+            - required
+            - optional
+        UserData: !Base64
+          "Fn::Sub": |
+            #!/bin/bash
+
+            set -o xtrace
+            /etc/eks/bootstrap.sh ${ClusterName} ${BootstrapArguments}
+            /opt/aws/bin/cfn-signal --exit-code $? \
+                     --stack  ${AWS::StackName} \
+                     --resource NodeGroup  \
+                     --region ${AWS::Region}
+        TagSpecifications:
+          - ResourceType: 'instance'
+            Tags:
+            -
+              Key: Appplication
+              Value:  !Ref 'AWS::StackName'
+            - 
+              Key: Owner
+              Value: DXC
+            -
+              Key: Name
+              Value: !Ref ClusterName
+
+  NodeGroup:
+    Type: AWS::EKS::Nodegroup
+    DependsOn:
+    - NodeLaunchTemplate
+    Properties:
+      CapacityType : ON_DEMAND
+      ClusterName:
+        Ref: ClusterName
+      LaunchTemplate:
+        Id: !Ref NodeLaunchTemplate
+      # NodegroupName:
+      #   !Join [ "-", [ "Nodegroup",!Ref ClusterName, !Ref "AWS::Region"] ]
+      NodeRole: !GetAtt NodeInstanceRole.Arn
+      ScalingConfig:
+        MinSize: !Ref NodeAutoScalingGroupMinSize
+        DesiredSize: !Ref NodeAutoScalingGroupDesiredCapacity
+        MaxSize: !Ref NodeAutoScalingGroupMaxSize
+      Subnets: !If [cSubnetNOTProvided, !Split [ ',', !GetAtt InvokeGetPrivateSubnets.SubnetIds ], !Split [ ',', !Ref Subnets]]
+      Tags:
+        Owner: DXC
+        Application: !Ref 'AWS::StackName'
+
+Outputs:
+  NodeInstanceRole:
+    Description: The node instance role
+    Value: !GetAtt NodeInstanceRole.Arn
+
+
+  NodeAutoScalingGroup:
+    Description: The autoscaling group
+    Value: !Ref NodeGroup

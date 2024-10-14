@@ -1,0 +1,64 @@
+{
+    "Comment": "A Step Function to send the report to Centralized CloudOps S3 bucket",
+    "StartAt": "GenerateReportFromDynamodb",
+    "States": {
+        "GenerateReportFromDynamodb": {
+            "Type": "Task",
+            "Resource": "${GenerateReportFromDynamodb}",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.Timeout",
+                        "Lambda.Unknown"
+                    ],
+                    "IntervalSeconds": 3,
+                    "BackoffRate": 2,
+                    "MaxAttempts": 2
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.DataLimitExceeded",
+                        "States.Runtime",
+                        "States.TaskFailed",
+                        "States.Permissions",
+                        "States.Timeout",
+                        "Lambda.Unknown"
+                    ],
+                    "Next": "GenerateReportFromDynamodbError"
+                }
+            ],
+            "End": true
+        },
+        "GenerateReportFromDynamodbError": {
+            "Type": "Pass",
+            "Parameters": {
+                "Cause.$": "$.Cause",
+                "Execution.$": "$$.Execution.Id",
+                "StateMachine": "$$.StateMachine",
+                "ErrorMessageFrom": "GenerateReportFromDynamodb Function"
+            },
+            "Next": "NotifyForLambdaFunctionFailure"
+        },
+        "NotifyForLambdaFunctionFailure": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sns:publish",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "IntervalSeconds": 3,
+                    "MaxAttempts": 2,
+                    "BackoffRate": 1.5
+                }
+            ],
+            "Parameters": {
+                "Message.$": "$",
+                "TopicArn": "${NotifyForLambdaFunctionFailure}"
+            },
+            "End": true
+        }
+    }
+}

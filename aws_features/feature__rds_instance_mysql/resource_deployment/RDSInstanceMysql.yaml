@@ -1,0 +1,960 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Creates a RDS MySQL instance'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: 'RDS Parameters'
+        Parameters:
+        - DBInstanceIdentifier
+        - EngineVersion
+        - AllowMajorVersionUpgrade
+        - DBSnapshotIdentifier
+        - DBAllocatedStorage
+        - DBInstanceClass
+        - DBName
+        - DBBackupRetentionPeriod
+        - DBMasterUsername-
+        - DBMasterUserPassword
+        - DBMultiAZ
+        - DBOptionGroupName
+        - DBParameterGroupName
+        - CloudwatchLogsExports
+        - SubDomainNameWithDot
+        - PreferredBackupWindow
+        - PreferredMaintenanceWindow
+        - EnableIAMDatabaseAuthentication
+        - VpcName
+        - SecurityGroup
+        - StorageType
+        - StorageEncrypted
+        - RDSEncryptionOption
+        - KmsKeyArn
+        - pFeatureVersion
+        - pDXCS3KeyPrefix
+        
+      - Label:
+            default: 'CloudWatch Alarms - DatabaseCPUUtilizationAlarm'
+        Parameters:
+        - ApplyCPUUtilizationAlarm
+        - CPUUtilizationPeriod
+        - CPUUtilizationStatistic
+        - CPUUtilizationThreshold
+        - CPUUtilizationEvaluationPeriods
+        - CPUUtilizationComparisonOperator
+
+      - Label:
+            default: 'CloudWatch Alarms - DatabaseFreeableMemoryAlarm'
+        Parameters:
+        - ApplyFreeableMemoryAlarm
+        - FreeableMemoryPeriod
+        - FreeableMemoryStatistic
+        - FreeableMemoryThreshold
+        - FreeableMemoryEvaluationPeriods
+        - FreeableMemoryComparisonOperator
+
+      - Label:
+            default: 'CloudWatch Alarms - DatabaseFreeStorageSpaceAlarm'
+        Parameters:
+        - ApplyFreeStorageSpaceAlarm
+        - FreeStorageSpacePeriod
+        - FreeStorageSpaceStatistic
+        - FreeStorageSpaceThreshold
+        - FreeStorageSpaceEvaluationPeriods
+        - FreeStorageSpaceComparisonOperator
+
+      - Label:
+            default: 'CloudWatch Alarms - DatabaseBurstBalanceAlarm'
+        Parameters:
+        - ApplyBurstBalanceAlarm
+        - BurstBalancePeriod
+        - BurstBalanceStatistic
+        - BurstBalanceThreshold
+        - BurstBalanceEvaluationPeriods
+        - BurstBalanceComparisonOperator
+
+      - Label:
+            default: 'CloudWatch Alarms - DatabaseDiskQueueDepthAlarm'
+        Parameters:
+        - ApplyDiskQueueDepthAlarm
+        - DiskQueueDepthPeriod
+        - DiskQueueDepthStatistic
+        - DiskQueueDepthThreshold
+        - DiskQueueDepthEvaluationPeriods
+        - DiskQueueDepthComparisonOperator
+
+      - Label:
+            default: 'CloudWatch Alarms - DatabaseReadLatencyAlarm'
+        Parameters:
+        - ApplyReadLatencyAlarm
+        - ReadLatencyPeriod
+        - ReadLatencyStatistic
+        - ReadLatencyThreshold
+        - ReadLatencyEvaluationPeriods
+        - ReadLatencyComparisonOperator
+
+      - Label:
+            default: 'CloudWatch Alarms - DatabaseSwapUsageAlarm'
+        Parameters:
+        - ApplySwapUsageAlarm
+        - SwapUsagePeriod
+        - SwapUsageStatistic
+        - SwapUsageThreshold
+        - SwapUsageEvaluationPeriods
+        - SwapUsageComparisonOperator
+
+      - Label:
+            default: 'CloudWatch Alarms - DatabaseWriteLatencyAlarm'
+        Parameters:
+        - ApplyWriteLatencyAlarm
+        - WriteLatencyPeriod
+        - WriteLatencyStatistic
+        - WriteLatencyThreshold
+        - WriteLatencyEvaluationPeriods
+        - WriteLatencyComparisonOperator
+
+      - Label:
+          default: 'Secondary Region RDS Parameters'
+        Parameters:
+        - MultiRegionRds 
+        - SecondaryRegion 
+        - SecondaryRegionVpcName 
+        - SecondaryRegionSecurityGroup
+        - SecondaryDBInstanceIdentifier
+        - pSecondaryS3Bucket
+        
+
+Parameters:
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/RDSInstanceMysql/S3AssetBucket
+    Description: "[DO NOT CHANGE] SSM Parameter for bucket location"
+  DBInstanceIdentifier:
+    Description: '[Required] A name for the DB instance. (Please validate the name and change if necessary)'
+    Type: String
+    Default: 'mysqlinstance'
+  DBSnapshotIdentifier:
+    Description: 'Optional name or Amazon Resource Name (ARN) of the DB snapshot from which you want to restore (leave blank to create an empty database).'
+    Type: String
+    Default: ''
+  DBAllocatedStorage:
+    Description: 'The allocated storage size, specified in GB (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: Number
+    Default: 5
+    MinValue: 5
+    MaxValue: 16384
+  DBInstanceClass:
+    Description: 'Please provide the instance type of database server here. For Ex-db.m5.large or which is compatible as per engine version.'
+    Type: String
+    Default: ''
+  DBName:
+    Description: 'Name of the database (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: String
+    Default: 'testmysql'
+  DBBackupRetentionPeriod:
+    Description: 'The number of days to keep snapshots of the database. Setting this parameter to 0 disables automated backups'
+    Type: Number
+    MinValue: 0
+    MaxValue: 35
+    Default: 30
+  DBMasterUsername:
+    Description: 'The master user name for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: String
+    Default: master
+  DBMasterUserPassword:
+    Description: 'The master password for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot. Also ignored when ParentSecretStack is used).'
+    Type: String
+    NoEcho: true
+    Default: 'temppassword'
+  DBMultiAZ:
+    Description: 'Specifies if the database instance is deployed to multiple Availability Zones for HA.'
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  DBOptionGroupName:
+    Description: 'Optional. Provide name of an existing DB option group. Leave blank for if not exists'
+    Type: String
+    Default: ''
+  DBParameterGroupName:
+    Description: 'Optional. Provide the existing DB parameter group. Leave blank for if not exists'
+    Type: String
+    Default: ''
+  CloudwatchLogsExports:
+    Description: 'Comma-delimited list of log types that need to be enabled for exporting to CloudWatch Logs. Leave blank for disabling EnableCloudwatchLogsExports'
+    Type: String
+    Default: "audit,error,general,slowquery"
+  SubDomainNameWithDot:
+    Description: 'Name that is used to create the DNS entry with trailing dot, e.g. ?{SubDomainNameWithDot}?{HostedZoneName}. Leave blank for naked (or apex and bare) domain. Requires ParentZoneStack parameter!'
+    Type: String
+    Default: 'mysql.'
+  PreferredBackupWindow:
+    Description: 'The daily time range in UTC during which you want to create automated backups.'
+    Type: String
+    Default: '09:54-10:24'
+  PreferredMaintenanceWindow:
+    Description: The weekly time range (in UTC) during which system maintenance can occur.
+    Type: String
+    Default: 'sat:07:00-sat:07:30'
+  EngineVersion:
+    Description: 'Please provide MySql engine version here.'
+    Type: String
+    Default: ''
+  AllowMajorVersionUpgrade:
+    Description: 'Allow database major engine version upgrades. Use with caution, test first in dev'
+    Type: String
+    Default: False
+  VpcName:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC Identifier, Provide any WorkLoad VPC V2 ID, default is WL VPC V2 ID.
+  SecurityGroup:
+    Type: String
+    Default: ''
+    Description: '[DO NOT Change] Default SG for the WL VPC will le loaded from SES.'
+  StorageEncrypted:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: 'Provide true if you want to encrypt your RDS DB Instance else keep that false'
+  RDSEncryptionOption:
+    Type: String
+    Default: Default KMS
+    Description: Select the encryption option to encrypt the RDS DB Instances.
+    AllowedValues:
+      - Default KMS
+      - Customer Managed KMS    
+  KmsKeyArn:
+    Type: String
+    Default: ''
+    Description: 'Provide the ARN of the AWS CMK KMS key that is used to encrypt the DB instance, otherwise it will use AWS Default Managed KMS'
+
+  MultiRegionRds:
+    Description: 'Multi-region Rds instance for Disaster Recovery.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  SecondaryRegion:
+    Description: 'Secondary region for Multi-region Rds instance(This should be Offering supported region)'
+    Type: "String"
+    Default: "None"
+  SecondaryRegionVpcName:
+    Type: String
+    Description: VPC Identifier, Vpc id of the secondary region vpc.
+    Default: "None"
+  SecondaryRegionSecurityGroup:
+    Type: String
+    Default: 'None'
+    Description: Security Group id of the secondary region(If not provided it feature will pick default).
+  SecondaryDBInstanceIdentifier:
+    Description: '[Required] A name for the DB instance. (Please validate the name and change if necessary)'
+    Type: String
+    Default: 'mysqlinstancedr'
+  pCommonServicenowTopic:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: "/DXC/SES/Module/CommonServicenow/ComSnowStdInputArn"
+    Description: SSM parameter which stores Common ServiceNow Standard Input Topic ARN
+  pSESLayerArn:
+    Description: "SSM parameter for Lambda Layer ARN"
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /DXC/SES/SESLayerLambdaArn
+  pSecondaryS3Bucket:
+    Description: '[Do not change the value] s3 bucket which has lambda artifacts for secondary region'
+    Type: String
+    Default: "None"
+  pfeatureName:
+    Description: '[Do not change the value] Feature name'
+    Type: String
+    Default: "RDSInstanceMysql"
+  
+
+  StorageType:
+    Type: String
+    Default: 'gp2'
+    AllowedValues: ['standard','gp2','gp3']
+    Description: 'Specifies the storage type to be associated with the DB instance.(STANDARD storage type does not support multi-region disaster recovery functionality.)'
+  EnableIAMDatabaseAuthentication:
+    Description: 'Enable mapping of AWS Identity and Access Management (IAM) accounts to database accounts (https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/UsingWithRDS.IAMDBAuth.html).'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  PriorityIncidentTopic:
+    Description: 'SNS Priority Incident Topic for service now alerts'
+    Type: "String"
+    Default: "DXCMS-CW-Alarms-Create-Incidents"
+  ApplyCPUUtilizationAlarm:
+    Description: 'Enable for creating CPU Utilisation Alarm. Pre-Requisite FeatureAWSCloudWatchAlarmsIncidentPriorities is deployed.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  CPUUtilizationPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 300
+  CPUUtilizationStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Average'
+  CPUUtilizationThreshold:
+    Description: 'The value to compare with the specified statistic.'
+    Type: Number
+    Default: 80
+    MinValue: 1
+    MaxValue: 100
+  CPUUtilizationEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 2
+  CPUUtilizationComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  ApplyFreeableMemoryAlarm:
+    Description: 'Enable for creating Free Memory Utilization Alarm.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  FreeableMemoryPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 300
+  FreeableMemoryStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Average'
+  FreeableMemoryThreshold:
+    Description: 'Average database freeable memory over last 10 minutes too low, performance may suffer'
+    Type: Number
+    Default: 15
+    MinValue: 1
+    MaxValue: 100
+  FreeableMemoryThresholdValAfterMath:
+    Description: '[DO NOT Update] To be filled by ses framework. FreeableMemoryThreshold(%) multiplied by storage allocated'
+    Default: 1024
+    Type: Number
+  FreeableMemoryEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 1
+  FreeableMemoryComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'LessThanOrEqualToThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+  
+  ApplyFreeStorageSpaceAlarm:
+    Description: 'Enable for creating Free Storage Space Alarm.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  FreeStorageSpacePeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 300
+  FreeStorageSpaceStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Minimum'
+  FreeStorageSpaceThreshold:
+    Description: 'Given % or less of storage space available on RDS Instance.'
+    Type: Number
+    Default: 15
+    MinValue: 0
+    MaxValue: 100
+  FreeStorageSpaceValAfterMath:
+    Description: '[DO NOT Update] To be filled by ses framework. FreeStorageSpaceThreshold(%) multiplied by storage allocated'
+    Default: 1024
+    Type: Number
+  FreeStorageSpaceEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 1
+  FreeStorageSpaceComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'LessThanOrEqualToThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  ApplyBurstBalanceAlarm:
+    Description: 'Enable for creating Burst Balance Balance Alarm.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  BurstBalancePeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 600
+  BurstBalanceStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Average'
+  BurstBalanceThreshold:
+    Description: 'Threshold for the Burst Balance.'
+    Type: Number
+    Default: 15
+  BurstBalanceEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 1
+  BurstBalanceComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'LessThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  ApplyDiskQueueDepthAlarm:
+    Description: 'Enable for creating Disk Queue Depth Alarm.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  DiskQueueDepthPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 600
+  DiskQueueDepthStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Average'
+  DiskQueueDepthThreshold:
+    Description: 'Threshold for the DiskQueueDepth'
+    Type: Number
+    Default: '64'
+  DiskQueueDepthEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 1
+  DiskQueueDepthComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  ApplyReadLatencyAlarm:
+    Description: 'Enable for creating Read Latency Alarm.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  ReadLatencyPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 600
+  ReadLatencyStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Average'
+  ReadLatencyThreshold:
+    Description: 'Threshold for the ReadLatency'
+    Type: Number
+    Default: '0.05'
+  ReadLatencyEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 1
+  ReadLatencyComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  ApplySwapUsageAlarm:
+    Description: 'Enable for creating Swap Usage Alarm.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  SwapUsagePeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 600
+  SwapUsageStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Average'
+  SwapUsageThreshold:
+    Description: 'Threshold for the SwapUsage. 256MB in bytes'
+    Type: Number
+    Default: '256000000'
+  SwapUsageEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 1
+  SwapUsageComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+  ApplyWriteLatencyAlarm:
+    Description: 'Enable for creating Write Latency Alarm.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  WriteLatencyPeriod:
+    Description: 'The period, in seconds, over which the statistic is applied. This is required for an alarm based on a metric. Valid values are 10, 30, 60, and any multiple of 60.'
+    Type: Number
+    Default: 600
+  WriteLatencyStatistic:
+    Description: 'The statistic for the metric associated with the alarm'
+    Type: String
+    AllowedValues: ['Average','Maximum', 'Minimum', 'SampleCount', 'Sum']
+    Default: 'Average'
+  WriteLatencyThreshold:
+    Description: 'Threshold for the WriteLatency.'
+    Type: Number
+    Default: '0.05'
+  WriteLatencyEvaluationPeriods:
+    Description: 'The number of periods over which data is compared to the specified threshold.'
+    Type: Number
+    Default: 1
+  WriteLatencyComparisonOperator:
+    Description: 'The arithmetic operation to use when comparing the specified statistic and threshold. The specified statistic value is used as the first operand.'
+    Type: String
+    Default: 'GreaterThanThreshold'
+    AllowedValues: [GreaterThanOrEqualToThreshold','GreaterThanThreshold','GreaterThanUpperThreshold','LessThanLowerOrGreaterThanUpperThreshold','LessThanLowerThreshold','LessThanOrEqualToThreshold', 'LessThanThreshold']
+
+Conditions:
+  UseKmsEncryption: !Equals [!Ref RDSEncryptionOption, 'Default KMS']
+  CreateCPUUtilizationAlarm: !Equals [!Ref "ApplyCPUUtilizationAlarm", "true"]
+  CreateFreeableMemoryAlarm: !Equals [!Ref "ApplyFreeableMemoryAlarm", "true"]
+  CreateFreeStorageSpaceAlarm: !Equals [!Ref "ApplyFreeStorageSpaceAlarm", "true"]
+  CreateBurstBalanceAlarm: !Equals [!Ref "ApplyBurstBalanceAlarm", "true"]
+  CreateDiskQueueDepthAlarm: !Equals [!Ref "ApplyDiskQueueDepthAlarm", "true"]
+  CreateReadLatencyAlarm: !Equals [!Ref "ApplyReadLatencyAlarm", "true"]
+  CreateSwapUsageAlarm: !Equals [!Ref "ApplySwapUsageAlarm", "true"]
+  CreateWriteLatencyAlarm: !Equals [!Ref "ApplyWriteLatencyAlarm", "true"]
+  
+  HasDBInstanceIdentifier: !Not [!Equals [!Ref DBInstanceIdentifier, '']]
+  EnableCloudwatchLogsExports: !Not [!Equals [!Ref "CloudwatchLogsExports", '']]
+  HasDBSnapshotIdentifier: !Not [!Equals [!Ref DBSnapshotIdentifier, '']]
+  HasDBOptionGroupName: !Not [!Equals [!Ref DBOptionGroupName, '']]
+  HasDBParameterGroupName: !Not [!Equals [!Ref DBParameterGroupName, '']]
+  cAWSCloudWatchAlarmsIncidentPriorities: !Not [!Equals [!Ref PriorityIncidentTopic, '']]
+
+  checkSecondaryRegion: !Not [!Equals [!Ref SecondaryRegion, 'None']]
+  checkSecondaryRegionVpcName: !Not [!Equals [!Ref SecondaryRegionVpcName, 'None']]
+  checkSecondaryRegionSecurityGroup: !Not [!Equals [!Ref SecondaryRegionSecurityGroup, 'None']]
+  checkMultiregionRds: !Equals [!Ref MultiRegionRds, "true"]
+
+  CreateMultiRegionRds: !And [{"Condition" : "checkSecondaryRegion"},{"Condition" : "checkSecondaryRegionVpcName"},{"Condition" : "checkSecondaryRegionSecurityGroup"},{"Condition" : "checkMultiregionRds"}]
+  #CreateMultiRegionRds: !Equals [!Ref MultiRegionRds, "true"]
+
+  CEventCategoriesAllRegion: !And [!Condition cAWSCloudWatchAlarmsIncidentPriorities, !Not [!Equals [eu-north-1, !Ref 'AWS::Region']]]
+  CEventCategoriesStockholmRegion: !And [!Condition cAWSCloudWatchAlarmsIncidentPriorities, !Equals [eu-north-1, !Ref 'AWS::Region']]
+
+Resources:
+  DatabaseSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Ref 'AWS::StackName'
+      VpcId: !Ref VpcName
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref SecurityGroup
+ 
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: !Ref 'AWS::StackName'
+      SubnetIds:  !Split [ ',', !GetAtt rInvokeGetPrivateSubnets.SubnetIds ]
+
+  rInvokeGetPrivateSubnets:
+    Type: "Custom::InvokeGetPrivateSubnets"
+    Properties:
+      ServiceToken: !Join ["", ["arn:aws:lambda:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":function:getPrivateSubnets"]]
+      VPCID: !Ref VpcName
+
+  DBInstance:
+    DeletionPolicy: Snapshot # default
+    UpdateReplacePolicy: Snapshot
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      AllocatedStorage: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref DBAllocatedStorage]
+      AllowMajorVersionUpgrade: !Ref AllowMajorVersionUpgrade
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: !Ref DBBackupRetentionPeriod
+      CopyTagsToSnapshot: true
+      DBInstanceClass: !Ref DBInstanceClass
+      DBInstanceIdentifier: !If [HasDBInstanceIdentifier, !Ref DBInstanceIdentifier, !Ref 'AWS::NoValue']
+      DBName: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref DBName]
+      DBParameterGroupName: !If [HasDBParameterGroupName, !Ref DBParameterGroupName, !Ref 'AWS::NoValue']
+      DBSnapshotIdentifier: !If [HasDBSnapshotIdentifier, !Ref DBSnapshotIdentifier, !Ref 'AWS::NoValue']
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      EnableCloudwatchLogsExports: !If [EnableCloudwatchLogsExports, !Split [ "," , !Ref CloudwatchLogsExports], !Ref 'AWS::NoValue']
+      EnableIAMDatabaseAuthentication: !Ref EnableIAMDatabaseAuthentication
+      Engine: mysql
+      EngineVersion: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref EngineVersion]
+      MasterUsername: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref DBMasterUsername]
+      MasterUserPassword: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref DBMasterUserPassword] 
+      MultiAZ: !Ref DBMultiAZ
+      OptionGroupName: !If [HasDBOptionGroupName, !Ref DBOptionGroupName, !Ref 'AWS::NoValue']
+      PreferredBackupWindow: !Ref PreferredBackupWindow
+      PreferredMaintenanceWindow: !Ref PreferredMaintenanceWindow
+      StorageType: !Ref StorageType
+      StorageEncrypted: !Ref StorageEncrypted
+      KmsKeyId: !If
+        - UseKmsEncryption
+        - !Ref "AWS::NoValue"
+        - !Ref KmsKeyArn
+      VPCSecurityGroups:
+      - !Ref DatabaseSecurityGroup
+
+
+  DatabaseCPUUtilization:
+    Type: 'AWS::CloudWatch::Alarm'
+    Condition: CreateCPUUtilizationAlarm
+    Properties:
+      AlarmActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      AlarmDescription: 'CPU Usage'
+      ComparisonOperator: !Ref CPUUtilizationComparisonOperator
+      Dimensions:
+      - Name: DBInstanceIdentifier
+        Value: !Ref DBInstance
+      EvaluationPeriods: !Ref CPUUtilizationEvaluationPeriods
+      MetricName: CPUUtilization
+      Namespace: 'AWS/RDS'
+      OKActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      Period: !Ref CPUUtilizationPeriod
+      Statistic: !Ref CPUUtilizationStatistic
+      Threshold: !Ref CPUUtilizationThreshold
+
+  DatabaseFreeableMemory:
+    Condition: CreateFreeableMemoryAlarm
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      AlarmDescription: 'Average database freeable memory over last 10 minutes too low, performance may suffer'
+      ComparisonOperator: !Ref FreeableMemoryComparisonOperator
+      Dimensions:
+      - Name: DBInstanceIdentifier
+        Value: !Ref DBInstance
+      EvaluationPeriods: !Ref FreeableMemoryEvaluationPeriods
+      MetricName: FreeableMemory
+      Namespace: 'AWS/RDS'
+      OKActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      Period: !Ref FreeableMemoryPeriod
+      Statistic: !Ref FreeableMemoryStatistic
+      Threshold: !Ref FreeableMemoryThresholdValAfterMath
+      Unit: Bytes
+
+  DatabaseFreeStorageSpace:
+    Condition: CreateFreeStorageSpaceAlarm
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      AlarmDescription: 'Give percentage or less of storage space available on RDS Instance'
+      ComparisonOperator: !Ref FreeStorageSpaceComparisonOperator
+      Dimensions:
+      - Name: DBInstanceIdentifier
+        Value: !Ref DBInstance
+      EvaluationPeriods: !Ref FreeStorageSpaceEvaluationPeriods
+      MetricName: FreeStorageSpace
+      Namespace: 'AWS/RDS'
+      OKActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      Period: !Ref FreeStorageSpacePeriod
+      Statistic: !Ref FreeStorageSpaceStatistic
+      Threshold: !Ref FreeStorageSpaceValAfterMath
+      Unit: Bytes
+  
+  DatabaseBurstBalance:
+    Condition: CreateBurstBalanceAlarm
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      AlarmDescription: 'Storage Burst Balance Credits Below 10%'
+      ComparisonOperator: !Ref BurstBalanceComparisonOperator
+      Dimensions:
+      - Name: DBInstanceIdentifier
+        Value: !Ref DBInstance
+      EvaluationPeriods: !Ref BurstBalanceEvaluationPeriods
+      MetricName: BurstBalance
+      Namespace: 'AWS/RDS'
+      OKActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      Period: !Ref BurstBalancePeriod
+      Statistic: !Ref BurstBalanceStatistic
+      Threshold: !Ref BurstBalanceThreshold
+      TreatMissingData: missing
+  
+  DatabaseDiskQueueDepth:
+    Condition: CreateDiskQueueDepthAlarm
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      AlarmDescription: 'RDS Disk Queue Outstanding I/Os Above 64 R/W Requests Waiting'
+      ComparisonOperator: !Ref DiskQueueDepthComparisonOperator
+      Dimensions:
+      - Name: DBInstanceIdentifier
+        Value: !Ref DBInstance
+      EvaluationPeriods: !Ref DiskQueueDepthEvaluationPeriods
+      MetricName: DiskQueueDepth
+      Namespace: 'AWS/RDS'
+      OKActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      Period: !Ref DiskQueueDepthPeriod
+      Statistic: !Ref DiskQueueDepthStatistic
+      Threshold: !Ref DiskQueueDepthThreshold
+
+  DatabaseReadLatency:
+    Condition: CreateReadLatencyAlarm
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      AlarmDescription: 'RDS Average Time Taken Per Disk Read I/O Operation'
+      ComparisonOperator: !Ref ReadLatencyComparisonOperator
+      Dimensions:
+      - Name: DBInstanceIdentifier
+        Value: !Ref DBInstance
+      EvaluationPeriods: !Ref ReadLatencyEvaluationPeriods
+      MetricName: ReadLatency
+      Namespace: 'AWS/RDS'
+      OKActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      Period: !Ref ReadLatencyPeriod
+      Statistic: !Ref ReadLatencyStatistic
+      Threshold: !Ref ReadLatencyThreshold
+      TreatMissingData: missing
+
+  DatabaseSwapUsage:
+    Condition: CreateSwapUsageAlarm
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      AlarmDescription: 'RDS Swap Usage High'
+      ComparisonOperator: !Ref SwapUsageComparisonOperator
+      Dimensions:
+      - Name: DBInstanceIdentifier
+        Value: !Ref DBInstance
+      EvaluationPeriods: !Ref SwapUsageEvaluationPeriods
+      MetricName: SwapUsage
+      Namespace: 'AWS/RDS'
+      OKActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      Period: !Ref SwapUsagePeriod
+      Statistic: !Ref SwapUsageStatistic
+      Threshold: !Ref SwapUsageThreshold
+      TreatMissingData: missing
+  
+  DatabaseWriteLatency:
+    Condition: CreateWriteLatencyAlarm
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      AlarmDescription: 'RDS Average Time Taken Per Disk Write I/O Operation'
+      ComparisonOperator: !Ref WriteLatencyComparisonOperator
+      Dimensions:
+      - Name: DBInstanceIdentifier
+        Value: !Ref DBInstance
+      EvaluationPeriods: !Ref WriteLatencyEvaluationPeriods
+      MetricName: WriteLatency
+      Namespace: 'AWS/RDS'
+      OKActions:
+      - !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      Period: !Ref WriteLatencyPeriod
+      Statistic: !Ref WriteLatencyStatistic
+      Threshold: !Ref WriteLatencyThreshold
+      TreatMissingData: missing
+
+  DatabaseEventSubscription:
+    Type: 'AWS::RDS::EventSubscription'
+    Condition: CEventCategoriesAllRegion
+    Properties:
+      EventCategories:
+      - failover
+      - failure
+      - 'low storage'
+      - maintenance
+      - 'read replica'
+      - recovery
+      SnsTopicArn: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      SourceIds: [!Ref DBInstance]
+      SourceType: 'db-instance'
+
+  DatabaseEventSubscriptionStockholmRegion:
+    Type: 'AWS::RDS::EventSubscription'
+    Condition: CEventCategoriesStockholmRegion
+    Properties:
+      EventCategories:
+      - failover
+      - failure
+      - 'low storage'
+      - maintenance
+      - recovery
+      SnsTopicArn: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${PriorityIncidentTopic}"
+      SourceIds: [!Ref DBInstance]
+      SourceType: 'db-instance'      
+
+  rDeployMultiRegionRdsRole:
+    Condition: CreateMultiRegionRds
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Join ["-", ["Dxcms-deploy-multi-region-rds-role", !Select [1, !Split ["-", !Ref "AWS::StackName"]], !Select [2, !Split ["-", !Ref "AWS::StackName"]], !Ref "AWS::Region"]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+              
+              - Effect: Allow
+                Action:
+                  - "ssm:AddTagsToResource"
+                  - "ssm:RemoveTagsFromResource"
+                  - "cloudformation:CreateStack"
+                  - "ssm:GetParameter"
+                  - "cloudformation:DeleteStack"
+                  - "ssm:PutParameter"
+                  - "ssm:DeleteParameter"
+                  - "s3:GetObject"
+                  - "lambda:CreateFunction"
+                  - "sns:TagResource"
+                  - "lambda:TagResource"
+                  - "sns:DeleteTopic"
+                  - "events:PutRule"
+                  - "iam:TagRole"
+                  - "iam:CreateRole"
+                  - "iam:PutRolePolicy"
+                  - "iam:PassRole"
+                  - "iam:DeleteRolePolicy"
+                  - "events:RemoveTargets"
+                  - "lambda:DeleteFunction"
+                  - "sns:Subscribe"
+                  - "iam:GetRole"
+                  - "events:DescribeRule"
+                  - "sns:GetTopicAttributes"
+                  - "lambda:InvokeFunction"
+                  - "lambda:GetFunction"
+                  - "sns:CreateTopic"
+                  - "iam:DeleteRole"
+                  - "events:DeleteRule"
+                  - "events:PutTargets"
+                  - "lambda:AddPermission"
+                  - "iam:GetRolePolicy"
+                  - "cloudformation:DescribeStacks"
+                  - "lambda:RemovePermission"
+
+                Resource: "*"
+
+  rDeployMultiRegionRds:
+    DependsOn: DBInstance
+    Condition: CreateMultiRegionRds
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Join
+                    - ''
+                    - - "Dxcms-Deploy-multi-region-rds-"
+                      - !Select [1, !Split ["-", !Ref "AWS::StackName"]]
+                      - "-"
+                      - !Select [2, !Split ["-", !Ref "AWS::StackName"]]
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref pDXCS3BucketName
+          SECONDARY_REGION: !Ref SecondaryRegion
+          S3_KEY: !Ref pDXCS3KeyPrefix
+          FEATURE_NAME: !Ref pfeatureName
+          COMMON_SERVICENOW_TOPIC: !Ref pCommonServicenowTopic
+          SECONDARY_BUCKET_NAME: !Ref pSecondaryS3Bucket
+          
+
+      Description: 'Handles the RDS Instance failover between regions'
+      Runtime: python3.11
+      Handler: dxcms_deploy_rds_multi_region.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt rDeployMultiRegionRdsRole.Arn
+      Timeout: 900
+      Layers:
+        - !Ref pSESLayerArn
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key: !Sub "${pDXCS3KeyPrefix}/dxcms_deploy_rds_multi_region.zip"
+
+  rSSMSecondaryRegionResources:
+    Condition: CreateMultiRegionRds
+    DependsOn: rDeployMultiRegionRds
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Join
+            - ''
+            - - "/DXC/RDS-MYSQL/SECONDARYRESOURCES-"
+              - !Select [2, !Split ["-", !Ref "AWS::StackName"]]
+      Description: "Stores the secondary region resource information"
+      Type: "String"
+      Value: "AWSPE-No Value"
+
+  rinvokerDeployMultiRegionRds:
+    Type: Custom::AwsLambdaAlarmsCreate
+    Condition: CreateMultiRegionRds
+    DependsOn: rDeployMultiRegionRds
+    Properties:
+        ServiceToken: !GetAtt rDeployMultiRegionRds.Arn
+        db_identifier: !Ref DBInstanceIdentifier
+        ssm_param: !Ref rSSMSecondaryRegionResources
+        sec_vpc: !Ref SecondaryRegionVpcName
+        sec_db_identifier: !Ref SecondaryDBInstanceIdentifier
+        sec_sg_id: !Ref SecondaryRegionSecurityGroup
+        opt_grp: !Ref DBOptionGroupName
+        param_grp: !Ref DBParameterGroupName
+        inst_cls: !Ref DBInstanceClass
+        cw_log: !Ref CloudwatchLogsExports
+        al_strg: !Ref DBAllocatedStorage
+        iam_ath: !Ref EnableIAMDatabaseAuthentication
+        db_name: !Ref DBName
+        multi_az: !Ref DBMultiAZ
+        pr_sns_topic: !Ref PriorityIncidentTopic
+        strg_type: !Ref StorageType
+
+Outputs:
+  InstanceName:
+    Description: 'The name of the database instance.'
+    Value: !Ref DBInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceName'
+  SecurityGroupId:
+    Description: 'The security group used to manage access to RDS MySQL.'
+    Value: !Ref DatabaseSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupId'

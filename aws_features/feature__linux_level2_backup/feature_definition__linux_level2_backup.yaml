@@ -1,0 +1,30 @@
+---
+# Feature Definition (FD) for LinuxLevel2Backup
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: LinuxLevel2Backup
+Version: '5.0.0.2'
+StandardCreationBatch: 1
+EnableFeature: true
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Linux Level 2 Snapshot Document v1
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - LinuxLevel2Backup.yaml

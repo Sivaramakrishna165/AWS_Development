@@ -1,0 +1,41 @@
+---
+# Feature Definition (FD) for AWSHealthEvents
+
+# Partition Key = Feature
+# No sort key needed
+
+Feature: AWSHealthEvents
+Version: '13.0.0.5'
+StandardCreationBatch: 3
+EnableFeature: true
+FeatureParams:
+  pEnableAWSHealthRiskEvents:
+    Description: '[Required] Enable to get the AWS Health Risk events (can be updated if necessary)'
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  pRiskEventsPriority:
+    Description: '[DO NOT CHANGE] RISK alerts always be sent with Priority:1'
+    Type: String
+    Default: '1'
+    AllowedValues: ['1']
+  pEnableAWSHealthALLEvents:
+    Description: '[Required] Enable to get the ALL the AWS Health events (can be updated if necessary)'
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  pAllEventsPriority:
+    Description: '[Required] Default is set to 3-Minor, other priorities are 1-critical, 2-major, 3-minor, 4-warning, 5-ok (can be updated if necessary)'
+    Type: String
+    Default: '3'
+    AllowedValues: ['1', '2', '3', '4', '5']
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: AWS Health Events Notification to SNOW via Agnostic API. 
+AllowDisable: true
+ResourceDeployment:
+  - aws_health_events.yaml

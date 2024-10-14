@@ -1,0 +1,26 @@
+Feature: HardenedAMIAmazonLinux
+Version: '8.0.0.4'
+StandardCreationBatch: 3
+EnableFeature: true
+Standards:
+  - Gold
+Owner: 
+  Name: AWS Platform Engineering Team
+  Email: awspe-all@dxc.com
+  OtherContactInfo: AWS Platform Engineering team, DXC Technology
+Purpose: Creates Custom AMI Automation SSM Document for Amazon Linux Distribution
+ScopeOverridesAllowed:
+  - Global
+  - Customer
+  - OrganizationUnit
+  - Account
+  - Region
+  - VPC
+  - Subnet
+  - Instance
+  - Volume
+AllowDisable: true
+ResourceDeployment:
+  - QSCreateAmazonLinuxAMI.json
+DependsOnFeature:
+  - DXCUnixSoeHardening
