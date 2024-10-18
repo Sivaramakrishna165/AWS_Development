@@ -1,0 +1,29 @@
+1. CLone the repository(AWS Capabilities) to my local (git clone <repo url>)
+2  Do the changes in the feature(local)
+2. Push the changes in the git (forked capabilities repo) 
+3. git checkout release-8.0.0 (to chnage the branch)
+4. git checkout -b release-9.0.0(create new branch)
+4. git status
+5. git add .
+6. git status
+7. git commit -m "Updated"
+8. git push
+9. Login to the Deployed Server 
+10. cd AWS-Offering-Capabilities
+11. git pull origin release-8.0.0
+
+to delete folder use below command:
+
+rm -r <folder-name>
+if it not working 
+sudo rm -r <folder-name>
+
+
+
+
+
+
+
+
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      

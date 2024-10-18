@@ -1,0 +1,2 @@
+#second.py
+import FIRST

@@ -1,0 +1,7 @@
+print("welcome")
+print("To")
+print("Python World")
+print("==============")
+print(10+20)
+print(10*2)
+print("===============")
