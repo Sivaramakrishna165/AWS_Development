@@ -1,7 +1,0 @@
-{
-  "setComputerName": false,
-  "setWallpaper": true,
-  "addDnsSuffixList": true,
-  "extendBootVolumeSize": true,
-  "adminPasswordType": "Random"
-}
