@@ -1,0 +1,281 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'A regional template which creates a CloudWatch Anomaly detection lambda functions'
+Parameters:
+  pDXCS3BucketName:
+    Type: "AWS::SSM::Parameter::Value<String>" 
+    Default: /DXC/SES/Module/CWCostAnomalyDetection/S3AssetBucket
+    Description: SSM Parameter for bucket location
+  pDXCS3KeyPrefix:
+    Type: String
+    Default: 'none'
+    Description: "[DO NOT CHANGE] S3 path to the Lambda_functions of Feature. To be Filled by creating/parent stack"
+  pFeatureVersion:
+    Type: String
+    Default: 'None'
+    Description: "[DO NOT CHANGE] Version of the Feature. To be Filled by creating/parent stack"
+  pCommonSNOWTopic:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: "/DXC/SES/Module/CommonServicenow/ComSnowStdInputArn"
+    Description: '[DO NOT CHANGE] ssm param of Common ServiceNow Topic for service now alerts'
+  pServices:
+    Type: String
+    Description: Top AWS Services which are monitor for CostAnomlay
+  pSenderEmailID:
+    Type: String
+    Description: provide the sender email id
+  pReceiverEmailID:
+    Type: String
+    Description: provide the sender email id
+
+Resources:
+
+  rDxcmsCostAWSServicesParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/CostAnomaly/AWSServices'
+      Type: String
+      Value: !Ref pServices
+      Description: 'SSM Parameter contains the cost anomaly AWS Services'
+
+  rDxcmsCostSenderNotifyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/CostAnomalydetection/Sender_Email_ID'
+      Type: String
+      Value: !Ref pSenderEmailID
+      Description: 'SSM Parameter contains the Email ids'
+
+  rDxcmsCostADNotifyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/DXC/CostAnomalydetection/Receiver_Email_ID'
+      Type: String
+      Value: !Ref pReceiverEmailID
+      Description: 'SSM Parameter contains the Email ids'
+
+  rDxcmsCostAnomalyScheduleRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Name: !Sub dxcms-cw-cost-anomlay-schedule-rule-${AWS::Region}
+      Description: "ScheduledRule"
+      ScheduleExpression: "cron(0 0 ? * SUN *)"
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: 
+            Fn::GetAtt: 
+              - rDxcmsCWCreateCostAnomalyAlarmLA
+              - Arn
+          Id: "create-cost-anomlay-lambda"
+          
+  PermissionForEventsToInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !GetAtt 
+        - rDxcmsCWCreateCostAnomalyAlarmLA
+        - Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - rDxcmsCostAnomalyScheduleRule
+          - Arn
+
+  rDxcmsADCostDynamoDBTable: 
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      BillingMode: 'PAY_PER_REQUEST'
+      AttributeDefinitions: 
+        - 
+          AttributeName: "ServiceName"
+          AttributeType: "S"
+        -
+          AttributeName: "CostImpact"
+          AttributeType: "S"
+      KeySchema: 
+        - 
+          AttributeName: "ServiceName"
+          KeyType: "HASH"
+        -
+          AttributeName: "CostImpact"
+          KeyType: "RANGE"
+      TableName: "Ft_Dxcms_Anomalydetection_Cost"
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsAnomalyDetectionDynamoDbTable
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsCWCostLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName:  !Sub 'dxcms-cw-cost-lambda-exec-role-${AWS::Region}'
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: rDxcmsCWCostAnomalyDetectionLambdaRole
+      - Key: Owner
+        Value: DXC
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: "/"
+      Policies:
+        - PolicyName: !Sub "dxcms-cw-cost-lambda_${AWS::Region}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+
+              - Sid: 'DynamoDBAccessPermisson'
+                Effect: Allow
+                Action:
+                - dynamodb:Scan
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                Resource: 
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_Anomalydetection_Cost/stream/*"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_Anomalydetection_Cost/index/*"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Ft_Dxcms_Anomalydetection_Cost"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AccountFeatureDefinitions"                              
+
+              - Sid: 'SESAccessPermission'
+                Effect: Allow
+                Action: 
+                  - ses:SendRawEmail
+                  - ses:GetIdentityVerificationAttributes
+                Resource: "*"
+
+              - Sid: 'SNSAccessPermission'
+                Effect: Allow
+                Action:
+                - sns:Publish
+                Resource: "*"
+
+              - Sid: 'SSMAccessPermission'
+                Effect: Allow
+                Action: 
+                  - ssm:GetParameter
+                  - ssm:PutParameter 
+                Resource: 
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${rDxcmsCostAWSServicesParameter}"
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${rDxcmsCostADNotifyParameter}"
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${rDxcmsCostSenderNotifyParameter}"
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/DXC/Notification/DXCNotifyEmail"
+
+              - Sid: 'IAMaccess'
+                Action:
+                - iam:ListAccountAliases
+                Effect: Allow
+                Resource: "*"
+
+              - Sid: 'costaccess'
+                Action:
+                - ce:GetAnomalies
+                - ce:CreateAnomalyMonitor
+                - ce:DeleteAnomalyMonitor
+                - ce:GetAnomalyMonitors
+                Effect: Allow
+                Resource: "*"
+
+  rDxcmsCWCreateCostAnomalyAlarmLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: create_anomaly_detection_cost_alarm.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsCWCostLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          SNS_TOPIC: !Ref pCommonSNOWTopic
+          CloudOpsEmail_ids: !Ref rDxcmsCostADNotifyParameter
+          sender: !Ref rDxcmsCostSenderNotifyParameter
+          table_name: !Ref rDxcmsADCostDynamoDBTable
+      Description: 'Lambda to create the cost anomaly'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/create_anomaly_detection_cost_alarm.zip'
+      Runtime: python3.11
+      FunctionName: !Sub "dxcms-cw-create-anomaly-detection-cost-alarm-${AWS::Region}"
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: !Sub "dxcms-cw-create-anomaly-detection-cost-alarm-${AWS::Region}"
+      - Key: Owner
+        Value: DXC
+
+  rDxcmsCWCreateCostAnomalyMonitorLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: create_cost_anomaly_monitor.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsCWCostLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          cloudOpsEmailId: '/DXC/Notification/DXCNotifyEmail'
+          SenderEmailId: !Ref rDxcmsCostSenderNotifyParameter
+      Description: 'Lambda to create the cost anomaly monitor'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/create_cost_anomaly_monitor.zip'
+      Runtime: python3.11
+      FunctionName: !Sub "dxcms-cw-create-cost-anomaly-monitor-${AWS::Region}"
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: !Sub "dxcms-cw-create-cost-anomlay-monitor-${AWS::Region}"
+      - Key: Owner
+        Value: DXC
+  
+  rDxcmsCWCostDynamodDBLambdaLA:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: load_dynamodb_cost.lambda_handler
+      Role: !GetAtt 
+        - rDxcmsCWCostLambdaExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          table_name: !Ref rDxcmsADCostDynamoDBTable
+          AWSServices: !Ref rDxcmsCostAWSServicesParameter
+      Description: 'Lambda to load the data for the cost'
+      Code:
+        S3Bucket: !Ref pDXCS3BucketName
+        S3Key:  !Sub '${pDXCS3KeyPrefix}/load_dynamodb_cost.zip'
+      Runtime: python3.11
+      FunctionName: !Sub "dxcms-cw-load-dynamodb-cost-alarm-${AWS::Region}"
+      Timeout: 900
+      Tags:
+      - Key: Application
+        Value: !Ref 'AWS::StackName'
+      - Key: Name
+        Value: !Sub "dxcms-cw-load-dynamodb-cost-alarm-${AWS::Region}"
+      - Key: Owner
+        Value: DXC
+
+  customInvokeLoadDynamodbLambda:
+    Type: Custom::AwsLambdaLoadDynamodb
+    DependsOn: rDxcmsCWCostDynamodDBLambdaLA
+    Properties:
+        ServiceToken: !GetAtt rDxcmsCWCostDynamodDBLambdaLA.Arn
+
+  customInvokeCreateCostMonitorLambda:
+    Type: Custom::AwsLambdaCreateCostMonitor
+    DependsOn: rDxcmsCWCreateCostAnomalyMonitorLA
+    Properties:
+        ServiceToken: !GetAtt rDxcmsCWCreateCostAnomalyMonitorLA.Arn
