@@ -1,5 +1,5 @@
 """
-It is loading the services names into Ft_Dxcms_Anomalydetection_Cost DynamoDB table by taking from definition file.
+It is loading the services names into Ft_Anomalydetection_Cost DynamoDB table by taking from definition file.
 It doesn't require any input to trigger.
 """
 import boto3
